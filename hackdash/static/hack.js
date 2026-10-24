@@ -47,7 +47,8 @@ async function pollCams() {
     S.cams = Array.isArray(r) ? r : r.cameras || []; S.camErr = null;
     if (!S.cam) {
       const want = new URLSearchParams(location.hash.slice(1)).get("cam");
-      const pick = S.cams.find(c => c.camera_id === want) || (S.cams.filter(c => c.live).length === 1 ? S.cams.find(c => c.live) : null);
+      const live = S.cams.filter(c => c.live);
+      const pick = live.find(c => c.camera_id === want) || (live.length === 1 ? live[0] : null);
       if (pick) openCamera(pick.camera_id);
     }
   } catch (err) { if (err.status !== 401) S.camErr = err.status === 404 ? "The live-view API (hackdash.live) isn't deployed yet." : `Couldn't load cameras: ${err.message}`; }
@@ -105,10 +106,7 @@ function openPtz(cam) {
   const l = document.createElement("link"); l.rel = "stylesheet"; l.href = `/hack/static/ptz.css?v=${Date.now()}`; document.head.append(l);
   const s = document.createElement("script"); s.src = `/hack/static/ptz.js?v=${Date.now()}`; s.onload = () => window.Ptz.open(cam); document.head.append(s);
 }
-api("/ptz").then(r => {
-  S.ptzCams = new Set(r.map(c => c.camera_id)); renderWall();
-  for (const c of r) document.querySelector("#topbar .grow")?.after(btn(`Move ${c.camera_id}`, "ghost", () => openPtz(c.camera_id)));
-}).catch(() => {});
+api("/ptz").then(r => { S.ptzCams = new Set(r.map(c => c.camera_id)); renderWall(); renderTop(); }).catch(() => {});
 
 // ------------------------------------------------------------------ the open camera, live (centre)
 function openCamera(id) {
@@ -365,15 +363,21 @@ function renderLink(pane, rows, title) {
 
 // ------------------------------------------------------------------ top bar
 function renderTop() {
-  const cams = S.cams || [], live = cams.filter(c => c.live).length;
+  const live = (S.cams || []).filter(c => c.live).length;
   const open = [...S.inc.values()].filter(x => x.status !== "closed").length;
   const c = camOf(S.cam), r = S.live;
   $("#pills").innerHTML = `
     <span class="pill ${open ? "red solid" : "green"}">${open ? `${open} drone${open === 1 ? "" : "s"} out` : "No drone out"}</span>
-    ${S.cams ? `<span class="pill ${!cams.length ? "" : live === cams.length ? "green" : "amber"}">${live}/${cams.length} cameras live</span>` : ""}
+    ${S.cams ? `<span class="pill ${live ? "green" : ""}">${live ? `${live} camera${live === 1 ? "" : "s"} live` : "No camera live"}</span>` : ""}
     ${r ? `<span class="pill ${r.judge_on ? "green" : "amber"}">${r.judge_on ? "judge on" : "judge off"}</span>` : ""}
     ${c?.test_rig ? `<span class="pill test">${esc(c.name || c.camera_id)}: test rig</span>` : ""}`;
   document.title = `${open ? `(${open}) ` : ""}Send drone · Netra`;
+  // Move-camera buttons (ptz.js), only for PTZ cameras that are live
+  const ptz = [...S.ptzCams || []].filter(id => camOf(id)?.live);
+  if (ptz.join() === S.ptzShown) return;
+  S.ptzShown = ptz.join();
+  document.querySelectorAll("#topbar .ptzmove").forEach(e => e.remove());
+  for (const id of ptz) { const b = btn(`Move ${id}`, "ghost", () => openPtz(id)); b.classList.add("ptzmove"); $("#topbar .grow").after(b); }
 }
 function tickClock() { $("#clock").textContent = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }); }
 
