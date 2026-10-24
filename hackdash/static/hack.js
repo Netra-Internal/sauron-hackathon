@@ -84,10 +84,11 @@ function renderWall() {
 }
 
 // Calibrate / Site setup (hackdash/static/calib.js, a full-screen screen over this page), loaded on first use
-function openCalib(cam) {
-  if (window.Calib) return window.Calib.open(cam);
-  const s = document.createElement("script"); s.src = `/hack/static/calib.js?v=${Date.now()}`; s.onload = () => window.Calib.open(cam); document.head.append(s);
+function openCalib(cam, tab) {
+  if (window.Calib) return window.Calib.open(cam, tab);
+  const s = document.createElement("script"); s.src = `/hack/static/calib.js?v=${Date.now()}`; s.onload = () => window.Calib.open(cam, tab); document.head.append(s);
 }
+document.querySelector("#topbar .grow")?.after(btn("Site setup", "ghost", () => openCalib(S.cam, "site")));
 
 // ------------------------------------------------------------------ the open camera, live (centre)
 function openCamera(id) {

@@ -153,11 +153,11 @@ const setData = (id, fc) => mapReady && map.getSource(id)?.setData(fc);
 function hint(text) { const el = $("#c-hint"); if (!el) return; el.textContent = text || ""; el.classList.toggle("hidden", !text); }
 
 // ------------------------------------------------------------------ open / close / load
-async function open(feed) {
+async function open(feed, tab) {
   try { if (!root) await build(); } catch (err) { toast(`Couldn't open Calibrate: ${err.message}`); root?.remove(); root = null; return; }
   root.classList.remove("hidden");
   map.resize();
-  C.feed = feed || C.feed; C.tab = "camera"; C.mode = null; C.pending = null; C.sel = null; C.bdraft = null; hint();
+  C.feed = feed || C.feed; C.tab = tab === "site" ? "site" : "camera"; C.mode = null; C.pending = null; C.sel = null; C.bdraft = null; hint();
   try {
     const r = await api("/calib/sites");
     C.sites = r.sites; C.liveCams = r.live_cameras;
