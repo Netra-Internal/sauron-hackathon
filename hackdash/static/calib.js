@@ -234,7 +234,8 @@ async function freeze() {
   if (d.points.length && !confirm(`A new frame clears the ${d.points.length} draft point pair(s) (their pixels are on the old picture). Continue?`)) return;
   try {
     const f = await send("POST", `/calib/freeze/${encodeURIComponent(feed)}`);
-    d.frame = { kind: "frozen", ...f, from: `live:${feed}`, url: `${API}/${f.url}` };
+    d.frame = { kind: "frozen", ...f, from: f.source === "ring" ? `live:${feed}` : `netra-ask preview of ${feed}`, url: `${API}/${f.url}` };
+    if (f.age_s > 60) toast(`${feed}'s live feed has no current frame: froze its newest picture, ${Math.round(f.age_s / 60)} min old. Fine if the camera hasn't moved.`);
     d.points = []; d.fit = null; d.footprint = null; C.sel = null; C.pending = null;
     changed();
   } catch (err) { toast(`Couldn't freeze a frame: ${err.message}`); }
@@ -344,7 +345,7 @@ function paneCam(pane) {
 
   // 1 frame
   pane.append(h(`<div class="label"><span>1 · Frame</span></div>`));
-  if (d.frame) pane.append(h(`<div class="muted small">${d.frame.kind === "frozen" ? "<b>Draft</b> frame frozen" : "Saved frame"} ${d.frame.width}×${d.frame.height} from ${esc(d.frame.from || "?")}, ${esc(ago(d.frame.captured_at))}.</div>`));
+  if (d.frame) pane.append(h(`<div class="muted small">${d.frame.kind === "frozen" ? "<b>Draft</b> frame frozen" : "Saved frame"} ${d.frame.width}×${d.frame.height} from ${esc(d.frame.from || "?")}, taken ${esc(ago(d.frame.captured_at))}.</div>`));
   else pane.append(h(`<p class="muted small">No frame yet. Freeze one from the live feed. Points you click are on this picture.</p>`));
   const frow = h(`<div class="row" style="margin-top:6px"></div>`);
   if (!feed) {

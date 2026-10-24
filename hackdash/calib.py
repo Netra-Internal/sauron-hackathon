@@ -25,6 +25,7 @@ import secrets
 import sys
 import time
 from collections import OrderedDict
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 import httpx
@@ -191,8 +192,9 @@ def frozen_view(tok: str) -> dict:
 
 
 @router.post("/freeze/{cam}")
-async def freeze(cam: str):
-    """The newest live ring frame of a pipeline camera, held as a draft calibration picture."""
+async def freeze(cam: str, req: Request):
+    """The newest live ring frame of a pipeline camera, held as a draft calibration picture. When the ring has none
+    (edge down), netra-ask's newest preview of the camera instead (what its own Grab freezes), with its real age."""
     live = _live()
     live._cam(cam)
     task = live.kick(cam)
@@ -202,15 +204,20 @@ async def freeze(cam: str):
         except asyncio.TimeoutError:
             pass
     t = live._current.get(cam)
-    if t is None:
-        raise HTTPException(409, f"no live frame from {cam} right now")
-    data = await live.FRAMES.edge_frame(cam, t)
+    data = await live.FRAMES.edge_frame(cam, t) if t is not None else None
+    source = "ring"
     if data is None:
-        raise HTTPException(409, f"the ring has no frame of {cam} at {t}")
+        r = await ask(req, "GET", f"/preview/{cam}.jpg")
+        if r.status_code != 200:
+            raise HTTPException(409, f"no live frame from {cam} right now, and netra-ask has no preview of it")
+        data, source = r.content, "preview"
+        lm = r.headers.get("last-modified")
+        t = int(parsedate_to_datetime(lm).timestamp() * NS) if lm else time.time_ns()
     try:
-        return keep_frozen(cam, t, data)
+        out = keep_frozen(cam, t, data)
     except Exception:
-        raise HTTPException(502, "the edge frame isn't a readable image")
+        raise HTTPException(502, "the frame isn't a readable image")
+    return {**out, "source": source, "age_s": round(time.time() - t / NS, 1)}
 
 
 @router.get("/frozen/{tok}.jpg")
