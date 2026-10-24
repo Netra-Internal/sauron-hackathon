@@ -1,3 +1,14 @@
+WORKING: Site setup Add/Remove camera DEPLOYED + checked (22:5x UTC); now doing PTZ-in-calibrate. Merge hack-calib to main (deployed from hack-calib + origin/hack-dash, since dash's live-video hack.js is deployed but not in main).
+
+## Add / remove a camera (William's report, fixed)
+- Calibrate / site setup -> Site setup tab: "Cameras on this site" has Calibrate + "Remove camera" (inline "Yes, remove / Cancel") on every record.
+  "Add a camera" lists every netra-ask feed not on the site yet (now: "+ Add Axis Q6215-LE · bench PTZ (axis-q6215)"):
+  one click adds it at the map centre and opens its calibration (drag the blue marker to where it's mounted).
+- Checked with Playwright as hack_launch on the deployed page (tools/calib_sitesetup_check.js): Axis button visible -> added
+  (axis-q6215-le-bench-ptz-7edb) -> calibration opened -> Remove -> confirm -> removed; Axis back in the Add list.
+  Camera 1 untouched. Screenshots plans/calib-addcam-{1-site,2-opened,3-remove-confirm}.png. I did NOT remove Camera 1: William's call.
+
+(earlier status, still true)
 DONE: Calibrate screen live at https://internal.netralabs.net/hack/ (top bar "Calibrate / site setup", or the "Calibrate" chip on a live camera tile); recalibrating an existing camera works, verified without saving over camera-1-5621.
 
 ## How to recalibrate the C920 (William)
