@@ -67,14 +67,17 @@ function renderWall() {
   }
   for (const c of cams) {
     const open = S.cam === c.camera_id;
-    // the open camera shows its newest live frame; the others the edge preview netra-ask already serves (~30 s old)
-    const src = open && S.live?.frame_url ? frameUrl(S.live.frame_url) : `/ask/api/preview/${encodeURIComponent(c.camera_id)}.jpg?m=${Math.floor(Date.now() / 30e3)}`;
+    // the edge preview netra-ask already serves (~30 s old); the open camera falls back to its newest live frame
+    const src = `/ask/api/preview/${encodeURIComponent(c.camera_id)}.jpg?m=${Math.floor(Date.now() / 30e3)}`;
     const t = h(`<button class="tile ${open ? "sel" : ""}"><div class="tframe"><img alt="">
       <div class="tover"><i class="live"></i><span>${esc(c.name || c.camera_id)}</span></div></div>
       <div class="tinfo"><div class="tstate">Live${c.fps != null ? ` · ${fx(c.fps, 1)} fps` : ""}${open ? " · open" : ""}</div>
       <div class="tchips">${c.test_rig ? `<span class="chip test">test rig</span>` : ""}${c.calibrated ? `<span class="chip">On the map</span>` : `<span class="chip amber">Not calibrated</span>`}</div></div></button>`);
     const img = t.querySelector("img");
-    img.onerror = () => { t.remove(); if (!wall.querySelector(".tile")) wall.append(none()); };
+    img.onerror = () => {
+      if (open && S.live?.frame_url && !img.dataset.fb) { img.dataset.fb = 1; img.src = frameUrl(S.live.frame_url); return; }
+      t.remove(); if (!wall.querySelector(".tile")) wall.append(none());
+    };
     img.src = src;
     t.onclick = () => openCamera(c.camera_id);
     wall.append(t);
