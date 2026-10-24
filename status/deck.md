@@ -6,6 +6,13 @@ DONE: Sauron hackathon deck (11 slides, claude.ai Slides artifact, private, not 
 8 person → coordinate (plans/calib-camera.png, ±6.6 m LOO median, worst 21.7 m, test rig) · 9 measured numbers · 10 what's next · 11 close (team: Pranay CEO, Landon CTO, William COO)
 Speaker notes on every slide. Look: near-black, one ember accent (#FF6A1A), Space Grotesk + IBM Plex Mono. Downloads as .pptx / PDF from the page.
 
+## Exported files (William's Windows Documents; not redirected to OneDrive: HKCU User Shell Folders Personal = %USERPROFILE%\Documents)
+- /mnt/c/Users/wstobaugh/Documents/Sauron-Hackathon-Deck.pptx  (C:\Users\wstobaugh\Documents\Sauron-Hackathon-Deck.pptx) 11 slides, 4.1 MB, speaker notes on all 11
+- /mnt/c/Users/wstobaugh/Documents/Sauron-Hackathon-Deck.pdf   (C:\Users\wstobaugh\Documents\Sauron-Hackathon-Deck.pdf) 11 pages, 1.5 MB
+- How: the Playwright browser is not signed in to claude.ai, so the page's own Export couldn't be used. I rendered the 11 slide files locally
+  in headless Chromium at 1920x1080 and built the PDF and pptx from those renders. The pptx slides are PICTURES (text not editable); for an
+  editable pptx, William can use Export on the artifact page. I checked all 11 renders: nothing overflows.
+
 ## Numbers and where they come from
 - crime: ~/sauron-data/crimevid/out/*/timeline.json. fence-climb +3.5 s, bike-lock +5.5 s, catalytic +11.5 s.
   ⚠ The brief said bike lock +3.5 s; the rendered timeline (and status/crimevid.md) say +5.5 s, so the deck says +5.5 s.
@@ -15,6 +22,5 @@ Speaker notes on every slide. Look: near-black, one ember accent (#FF6A1A), Spac
 - Box lag 2.9-6.4 s: status/boxes.md. Calibration: status/calib.md + calib-camera.png.
 
 ## Not done / notes
-- Not visually checked in the renderer (the Slides type says not to verify unless asked); open the link and skim for overflow.
 - Only read files; no camera, droplet or other agents' files touched.
 - William must share it from the page's Share menu before anyone else can open it.
