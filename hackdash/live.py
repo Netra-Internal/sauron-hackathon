@@ -277,6 +277,12 @@ async def _advance(cam: str):
         tried = t
 
 
+def on_bucket(cam: str):
+    """A new bucket arrived (mirror or relay): fetch its frame now, not at the next poll, while someone is watching."""
+    if time.monotonic() - _watched.get(cam, -1e9) < WATCH_S:
+        kick(cam)
+
+
 def kick(cam: str) -> asyncio.Task | None:
     t = _task.get(cam)
     if t is None or t.done():
@@ -342,6 +348,5 @@ async def edge_bucket(request: Request):
     result = json.loads(form["result"])
     cam = str(result["camera_id"])
     OBS.push(cam, result.get("positions") or [], result.get("complete_ns"))
-    if time.monotonic() - _watched.get(cam, -1e9) < WATCH_S:
-        kick(cam)                                # fetch the new frame now, not at the next poll (less lag)
+    on_bucket(cam)
     return {"ok": True}
