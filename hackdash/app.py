@@ -25,7 +25,8 @@ STATIC = Path(__file__).parent / "static"
 PREFIX = "/hack"
 LOGIN = "/map/login?next=/hack/"
 # machine routes that check the worker Bearer token themselves (hackdash.live: nginx mirror of the edge bucket POST)
-NO_LOGIN = {f"{PREFIX}/api/_edge/bucket"}
+NO_LOGIN = {f"{PREFIX}/api/_edge/bucket", f"{PREFIX}/relay/api/edge/bucket", f"{PREFIX}/relay/api/edge/config",
+            f"{PREFIX}/relay/api/edge/heartbeat"}   # hackdash.relay: the edge's ask base URL; token checked by us/netra-ask
 
 sys.path.insert(0, os.environ.get("ASK_INTERNAL_DIR", "/opt/netra/netra-internal"))
 NO_AUTH = os.environ.get("HACK_NO_AUTH") == "1"
@@ -40,10 +41,10 @@ ROUTERS = {"live": "hackdash.live", "launch": "hackdash.launch", "calib": "hackd
 MOUNTED: dict[str, str] = {}   # name -> "ok" or the import error
 
 
-def _mount(name: str, module: str):
+def _mount(name: str, module: str, prefix: str = f"{PREFIX}/api"):
     try:
         mod = importlib.import_module(module)
-        app.include_router(mod.router, prefix=f"{PREFIX}/api")
+        app.include_router(mod.router, prefix=prefix)
         MOUNTED[name] = "ok"
     except Exception as e:
         MOUNTED[name] = f"{type(e).__name__}: {e}"
@@ -93,3 +94,4 @@ app.mount(f"{PREFIX}/static", StaticFiles(directory=STATIC), name="static")
 
 for _name, _module in ROUTERS.items():
     _mount(_name, _module)
+_mount("relay", "hackdash.relay", f"{PREFIX}/relay")

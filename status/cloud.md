@@ -1,5 +1,58 @@
-NEEDS-MANAGER: shadow cloud edge is up and waiting for video, but the C920 shim on the Jetson was stopped at 14:53:27 PDT by the netra-demo session, so there is no camera stream to shadow.
+WORKING: Linovision (ZCM2126N) path prepared on the Jetson and waiting for it to be plugged in; C920 kept as fallback. Will verify the frame on /hack/ the moment it streams.
 
+## Linovision prep (15:30-15:34 PDT)
+- Jetson wired port enP8p1s0: new NM profile `netra-linovision` = static 192.168.1.20/24, never-default, no DNS,
+  route metric 900, IPv6 off, autoconnect priority 50 (beats the DHCP "Wired connection 1"). Routes checked after:
+  default still only via wlP1p1s0; nothing via lte0. Plus `ip route add unreachable 192.168.1.0/24 metric 2000` (runtime
+  only) so camera creds never go out the Wi-Fi default route while the cable is out.
+- netra-cloud-push source (~/cloud/push.env, backup push.env.c920): `jetson-c920 = Linovision main
+  /Streaming/Channels/101 (stream copy) | fallback rtsp://127.0.0.1:8556/c920`; each reconnect tries Linovision first.
+  Camera id stays jetson-c920 (no sites.yaml / netra-ask change). Creds from /etc/netra-ptz.env, URL-encoded, file 600;
+  logs redact them.
+- Why main stream copy: 16.8 Mbit/s fits the Wi-Fi uplink (64-93 Mbit/s); the pod edge samples 5 fps itself. Costs:
+  ~7.5 GB/h through the droplet relay and the pod ring (20 GB cap ≈ 2.7 h). After the demo, set the camera to 1080p
+  5-10 fps / ~4 Mbit/s (ISAPI) or switch to the sub-stream if quality allows.
+- Still DOWN: the C920 is unplugged (15:24:56), so /hack/ has no live frame until the Linovision streams.
+
+
+## Live incident 15:25 PDT
+- Pod edge, relay and tunnel are all still up and healthy; pod feed_health at 22:29:11 UTC: fps 0, frame_age 255 s
+  because the shim on the Jetson has no device (`Cannot open video device /dev/video0`, runOnInit exits 254 every 5 s).
+- Fix = plug the C920 back into the Jetson USB. netra-c920-rtsp retries by itself, my push retries every 5 s, the pod
+  edge resumes on its own (no action needed from anyone else). /hack/ recovers within ~30 s.
+- If the camera was moved to ANOTHER box for the demo: that box needs the shim + `cloud/push.sh` with
+  STREAMS="jetson-c920=<its rtsp>" (or a new camera id + sites.yaml entry) and its key in the droplet's cloudrelay — tell me which box.
+
+
+## Cutover executed (manager GO, 22:19 UTC) — each step verified
+1. 22:19:33 Jetson `sudo systemctl stop netra-edge@jetson-c920` → inactive. Untouched and still active: netra-c920-rtsp,
+   netra-edge-serve, netra-cloud-push. (The other units belong to netra-demo / were stopped by it; not touched.)
+2. 22:20 pod env EDGE_MODE=prod (update-pod, read back) + restart. New ports: SSH **22126**, RTSPS **22127**.
+   22:21:32 pod edge `jetson-c920` ready, posting to production: feed_health worker `f16ede3d5cc2:280`, 5 fps, infer 46 ms,
+   frame_age 1.05 s; 16 buckets/min.
+3. 22:21 Jetson push.env POD=63.141.33.141:22127 (restarted my netra-cloud-push). Droplet: `systemctl stop
+   netra-ask-edge-tunnel`; new transient unit **netra-ask-cloud-tunnel** = ssh -N -p 22126 -L 127.0.0.1:8450:127.0.0.1:8450
+   root@63.141.33.141 (key /root/.ssh/cloudedge_ed25519). /health through it lists the pod ring `jetson-c920`.
+4. Relay (manager, 22:22): pod edge ASK base → https://internal.netralabs.net/hack/relay (config 200 through it).
+   Switched live without a pod restart (so ports stay put): 22:22:57 edge ready, posted 7 / failed 0; feed_health worker
+   `f16ede3d5cc2:6057`, infer 34-38 ms, frame_age 1.06-1.12 s; 20 buckets in 30 s in `segments`.
+   ⚠️ my mistake: I stopped the old supervisor before relaunching → edge down ~70 s (22:21:50-22:22:57).
+   Persisted: /workspace/edge/ask_url on the pod; boot.sh reads it on any restart.
+Verified /hack/ (signed in, 15:23:33-15:23:48 PDT, 4 polls of /hack/api/cameras/jetson-c920/live): lag_s 3.29, 2.93,
+3.25, 2.47; boxes 0/2/0/0 (people come and go); frame.jpg 200, 87 KB, 0.17 s — real DIB-window view (viaduct, field).
+
+## If anything breaks during the demo: rollback (≈1 min)
+Jetson `sudo systemctl start netra-edge@jetson-c920`; droplet `systemctl stop netra-ask-cloud-tunnel; systemctl start
+netra-ask-edge-tunnel`; then stop the pod edge (pod-action stop on izuotrrx9igtpk) so two edges never post one id.
+⚠️ A pod restart remaps its public ports: then update POD= in the Jetson ~/cloud/push.env (RTSPS port) and the
+`-p` of netra-ask-cloud-tunnel (SSH port) from get-pod.
+
+## Not done
+- Shadow side-by-side was skipped (manager: go fast). Pod alone in shadow 22:16-22:19: 5.0 fps, infer 50-60 ms (Jetson
+  75-86 ms), SigLIP embeddings on 15/15 tracks, pose on 6. Data in R2 _work/sauron-cloud/pod/shadow.tgz.
+- Jetson GPU: nothing of ours on it now (capture shim is CPU x264).
+
+## Earlier (before the go)
 ## Blocker (not mine to fix)
 - A separate session (tailnet tag:ssh-tag 100.124.77.56, log /root/netra-demo/CHANGES.log on the Jetson) ran
   `systemctl stop netra-edge@axis-q6215 netra-edge@jetson-c920 netra-edge@node3-c920 netra-c920-rtsp netra-edge-serve`

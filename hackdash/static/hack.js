@@ -47,7 +47,8 @@ async function pollCams() {
     S.cams = Array.isArray(r) ? r : r.cameras || []; S.camErr = null;
     if (!S.cam) {
       const want = new URLSearchParams(location.hash.slice(1)).get("cam");
-      const pick = S.cams.find(c => c.camera_id === want) || (S.cams.filter(c => c.live).length === 1 ? S.cams.find(c => c.live) : null);
+      const live = S.cams.filter(c => c.live);
+      const pick = live.find(c => c.camera_id === want) || (live.length === 1 ? live[0] : null);
       if (pick) openCamera(pick.camera_id);
     }
   } catch (err) { if (err.status !== 401) S.camErr = err.status === 404 ? "The live-view API (hackdash.live) isn't deployed yet." : `Couldn't load cameras: ${err.message}`; }
@@ -56,25 +57,29 @@ async function pollCams() {
 const camOf = id => S.cams?.find(c => c.camera_id === id);
 function renderWall() {
   const wall = $("#wall");
-  const cams = (S.cams || []).slice().sort((a, b) => b.live - a.live);   // live cameras first
+  // only cameras with a current picture: a camera that isn't live (or whose picture won't load) isn't listed
+  const cams = (S.cams || []).filter(c => c.live);
+  const none = () => h(`<div class="wempty">No camera is live right now.</div>`);
   wall.innerHTML = "";
-  wall.append(h(`<div class="whead"><h2>Cameras</h2><span class="muted small">${S.cams ? `${cams.filter(c => c.live).length} of ${cams.length} live` : ""}</span></div>`));
+  wall.append(h(`<div class="whead"><h2>Cameras</h2><span class="muted small">${S.cams ? `${cams.length} live` : ""}</span></div>`));
   if (S.camErr || !cams.length) {
-    wall.append(h(`<div class="wempty">${esc(S.camErr || (S.cams ? "No cameras." : "Loading…"))}</div>`));
+    wall.append(S.camErr || S.cams ? (S.camErr ? h(`<div class="wempty">${esc(S.camErr)}</div>`) : none()) : h(`<div class="wempty">Loading…</div>`));
     return;
   }
   for (const c of cams) {
     const open = S.cam === c.camera_id;
-    // the open camera shows its newest live frame; the others the edge preview netra-ask already serves (~30 s old)
-    // a camera that isn't live shows no picture: its last preview can be days old
-    const src = !c.live ? null : open && S.live?.frame_url ? frameUrl(S.live.frame_url) : `/ask/api/preview/${encodeURIComponent(c.camera_id)}.jpg?m=${Math.floor(Date.now() / 30e3)}`;
-    const t = h(`<button class="tile ${open ? "sel" : ""}"><div class="tframe"><img alt=""><div class="tnone hidden">No picture yet</div>
-      <div class="tover"><i class="${c.live ? "live" : "down"}"></i><span>${esc(c.name || c.camera_id)}</span></div></div>
-      <div class="tinfo"><div class="tstate">${c.live ? `Live${c.fps != null ? ` · ${fx(c.fps, 1)} fps` : ""}` : "Not live"}${open ? " · open" : ""}</div>
+    // the edge preview netra-ask already serves (~30 s old); the open camera falls back to its newest live frame
+    const src = `/ask/api/preview/${encodeURIComponent(c.camera_id)}.jpg?m=${Math.floor(Date.now() / 30e3)}`;
+    const t = h(`<button class="tile ${open ? "sel" : ""}"><div class="tframe"><img alt="">
+      <div class="tover"><i class="live"></i><span>${esc(c.name || c.camera_id)}</span></div></div>
+      <div class="tinfo"><div class="tstate">Live${c.fps != null ? ` · ${fx(c.fps, 1)} fps` : ""}${open ? " · open" : ""}</div>
       <div class="tchips">${c.test_rig ? `<span class="chip test">test rig</span>` : ""}${c.calibrated ? `<span class="chip">On the map</span>` : `<span class="chip amber">Not calibrated</span>`}</div></div></button>`);
     const img = t.querySelector("img");
-    img.onerror = () => { img.classList.add("hidden"); t.querySelector(".tnone").classList.remove("hidden"); };
-    if (src) img.src = src; else { img.classList.add("hidden"); t.querySelector(".tnone").classList.remove("hidden"); t.querySelector(".tnone").textContent = "Not live: no current picture"; }
+    img.onerror = () => {
+      if (open && S.live?.frame_url && !img.dataset.fb) { img.dataset.fb = 1; img.src = frameUrl(S.live.frame_url); return; }
+      t.remove(); if (!wall.querySelector(".tile")) wall.append(none());
+    };
+    img.src = src;
     t.onclick = () => openCamera(c.camera_id);
     const cal = h(`<span class="chip calib" role="button" title="Calibrate this camera on the map">Calibrate</span>`);   // calib.js
     cal.onclick = e => { e.stopPropagation(); openCalib(c.camera_id); };
@@ -101,10 +106,7 @@ function openPtz(cam) {
   const l = document.createElement("link"); l.rel = "stylesheet"; l.href = `/hack/static/ptz.css?v=${Date.now()}`; document.head.append(l);
   const s = document.createElement("script"); s.src = `/hack/static/ptz.js?v=${Date.now()}`; s.onload = () => window.Ptz.open(cam); document.head.append(s);
 }
-api("/ptz").then(r => {
-  S.ptzCams = new Set(r.map(c => c.camera_id)); renderWall();
-  for (const c of r) document.querySelector("#topbar .grow")?.after(btn(`Move ${c.camera_id}`, "ghost", () => openPtz(c.camera_id)));
-}).catch(() => {});
+api("/ptz").then(r => { S.ptzCams = new Set(r.map(c => c.camera_id)); renderWall(); renderTop(); }).catch(() => {});
 
 // ------------------------------------------------------------------ the open camera, live (centre)
 function openCamera(id) {
@@ -361,15 +363,21 @@ function renderLink(pane, rows, title) {
 
 // ------------------------------------------------------------------ top bar
 function renderTop() {
-  const cams = S.cams || [], live = cams.filter(c => c.live).length;
+  const live = (S.cams || []).filter(c => c.live).length;
   const open = [...S.inc.values()].filter(x => x.status !== "closed").length;
   const c = camOf(S.cam), r = S.live;
   $("#pills").innerHTML = `
     <span class="pill ${open ? "red solid" : "green"}">${open ? `${open} drone${open === 1 ? "" : "s"} out` : "No drone out"}</span>
-    ${S.cams ? `<span class="pill ${!cams.length ? "" : live === cams.length ? "green" : "amber"}">${live}/${cams.length} cameras live</span>` : ""}
+    ${S.cams ? `<span class="pill ${live ? "green" : ""}">${live ? `${live} camera${live === 1 ? "" : "s"} live` : "No camera live"}</span>` : ""}
     ${r ? `<span class="pill ${r.judge_on ? "green" : "amber"}">${r.judge_on ? "judge on" : "judge off"}</span>` : ""}
     ${c?.test_rig ? `<span class="pill test">${esc(c.name || c.camera_id)}: test rig</span>` : ""}`;
   document.title = `${open ? `(${open}) ` : ""}Send drone · Netra`;
+  // Move-camera buttons (ptz.js), only for PTZ cameras that are live
+  const ptz = [...S.ptzCams || []].filter(id => camOf(id)?.live);
+  if (ptz.join() === S.ptzShown) return;
+  S.ptzShown = ptz.join();
+  document.querySelectorAll("#topbar .ptzmove").forEach(e => e.remove());
+  for (const id of ptz) { const b = btn(`Move ${id}`, "ghost", () => openPtz(id)); b.classList.add("ptzmove"); $("#topbar .grow").after(b); }
 }
 function tickClock() { $("#clock").textContent = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }); }
 
