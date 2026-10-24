@@ -1,35 +1,30 @@
-BLOCKED: /hack/ is live on the droplet (page + app + nginx + unit); waiting for hackdash.live (boxes) and hackdash.launch (launch) to land before the real-frame screenshot.
+DONE: https://internal.netralabs.net/hack/ shows the real jetson-c920 ring frame with real edge person boxes, chips, Send drone, incidents + droplink messages; screenshot plans/dash-live.png.
 
-Branch hack-dash @ a6c8552 (pushed). Files: hackdash/app.py, hackdash/static/{index.html,hack.css,hack.js}, deploy/{install.sh,sauron-hack.service,nginx-hack.conf}, requirements.txt.
+Branch hack-dash @ 0eef97a (pushed; contains origin/main 555872e incl. launch's abort-ordering fix d85fee4).
+Deployed from that merged tree with deploy/install.sh at 21:41 UTC; deployed hackdash/launch.py md5 == origin/main's.
+/hack/api/health (signed in): routers live=ok, launch=ok, auth=internal login.
 
-Live now (checked 14:28 PDT):
-- https://internal.netralabs.net/hack/ -> 303 to /map/login when signed out; signed in, the page renders and says
-  "live-view API (hackdash.live) isn't deployed yet" / "launch API isn't deployed yet" / "droplink isn't deployed yet" (no mock data).
-- sauron-hack.service active on 127.0.0.1:8500, user netra, code /opt/netra/sauron-hack, venv .venv (fastapi 0.115.12, uvicorn 0.34.2, httpx, psycopg, pillow).
-- nginx: /hack/ block added to /etc/nginx/sites-available/internal between ">>> /hack/" markers; nginx -t ok; backup /root/internal.nginx.bak-20261024-212740.
-- /hack/api/health (signed in) lists which routers mounted and the import error of any that didn't.
+Screenshot (plans/dash-live.png, 14:40 PDT, real data, nothing staged): C920 DIB window frame, 1 person in view,
+box + chip "#9310 0.28 · —" + Send drone; "≈3.8 s behind live", "judge off", "test rig"; left pane = 2 real operator
+incidents launched earlier by the manager/launch tests (closed, dismissed; forwarded 6/6 · 200; drone got 8 / 19) and
+the droplink messages (signature ok, abort/end/incident summaries). Measured lag in the page: 3.3-6.0 s.
 
-For boxes / launch (API shapes are as in ARCH.md; the page reads exactly those fields):
-- app.py mounts hackdash.live.router and hackdash.launch.router under /hack/api, tolerantly (missing module -> 404s, logged).
-- Login middleware covers every /hack path; request.state.user = the signed-in user (use it for audit).
-  EXEMPT: exactly /hack/api/_edge/bucket (boxes checks the worker Bearer token itself).
-- Unit env: EnvironmentFile=-/etc/netra-ask.env then /etc/sauron-hack.env (ours overrides). So ASK_WORKER_TOKEN,
-  ASK_EDGE_URL=http://127.0.0.1:8450, ASK_DATABASE_URL=postgresql:///netra_ask, DISPATCH_WEBHOOK_SECRET, ASK_DRONE_TOKEN are all present.
-  Runs as netra -> peer auth to netra_ask works.
-- Jetson read-only check: netra's own key works (verified: `systemctl is-active netra-dispatch@jetson-c920` -> inactive).
-  Use env HACK_JETSON_SSH = "ssh -o BatchMode=yes -o ConnectTimeout=5 -o UserKnownHostsFile=/var/lib/sauron-hack/known_hosts netra@100.102.178.107"
-  (known_hosts seeded by install.sh from root's).
-- Page assumptions to keep: GET /incidents (no ?open) returns ALL demo incidents (array, or {incidents:[...]}) with
-  id,status ("closed" when closed),camera_id,opened_at,updated_at,closed_at,located,lat,lon,radius_m,loc_source,site_track_id,
-  forwarded:[{at,type?,status|error}],why_label. GET /drone/messages?since=<seq>: `seq` must be droplink's own monotonic
-  sequence (the page sends max seq seen); messages match an incident by incident_id. frame_url may be absolute or relative to /hack/api.
-- Extra pip deps: add to requirements.txt; install.sh pip-installs it.
+Fixed from real data:
+- t_ns (~1.8e18) lost precision as a JS number, so /launch's exact obs match (launch.obs_at) silently fell back to the
+  newest box. The page now keeps t_ns as the raw digit string and posts it unquoted (verified: t_ns == frame_url's t).
+- /incidents shape: forwarded is {attempts, delivered, last{...}}, plus commands[], evidence{"frame.jpg","crop.jpg"},
+  edge_track. The panel crashed on it (`.at is not a function`); it now shows delivered/attempts, last status, commands,
+  evidence crop/frame, the person id from edge_track. "operator_launch" title -> "Operator launch".
+- An operator-launch label was shown as "scene facts · Jev pointed at this person"; it no longer claims a judge verdict.
+- Not-live cameras showed days-old previews (node3 indoor desk); they now show "Not live: no current picture". Live first.
+- Drone messages: one-line summary (status · verdict · lat,lon ±m / command · reason), signed body folded.
+- Asset URLs are versioned by mtime (a redeploy was hidden by the browser cache).
+- install.sh now REFUSES a tree that doesn't contain origin/main or has uncommitted hackdash/deploy changes, and waits
+  for the app to answer after restart.
 
-Deploy: `deploy/install.sh [CHECKOUT]` from the laptop. It rsyncs hackdash/, deploy/, requirements.txt WITHOUT --delete
-(so a deploy from one branch doesn't wipe another agent's router), restarts only sauron-hack, and adds the nginx block once.
-Manager: deploy from the integrated checkout once live.py/launch.py merge; I'll then take plans/dash-live.png.
-
-For the manager (not mine to change):
-- The nginx `mirror` of /ask/api/edge/bucket -> /hack/api/_edge/bucket that boxes wants goes in the /ask location (netra-ask's block).
-- After login, /map/login won't send you back to /hack/ (netra-internal common.auth NEXT_OK lacks "/hack"); you land on /map. One-word add there if wanted.
-- Map with fused people (nice-to-have) not built; centre shows the opened camera live instead of the map.
+Not done / notes:
+- I did not press Send drone myself (the manager/launch tests already exercised launch -> droplink -> abort -> end;
+  visible in the screenshot). The confirm UI is: Send drone -> "Send drone to #id? Yes / Cancel".
+- Map with fused people (nice-to-have) not built.
+- After /map/login you land on /map, not /hack/ (netra-internal common.auth NEXT_OK lacks "/hack").
+- People on this view are 10-50 px tall in the field; boxes are small at 1280 px display.
