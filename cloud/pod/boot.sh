@@ -64,6 +64,8 @@ if [ "$EDGE_MODE" = shadow ]; then
   keep shadowsink $PY -u cloud/shadowsink.py --port 8470 --out $W/shadow &
   export ASK_URL=http://127.0.0.1:8470
 else
+  # /workspace/edge/ask_url (if present) overrides: e.g. https://internal.netralabs.net/hack/relay (answers buckets at once)
+  [ -s $W/ask_url ] && ASK_URL=$(cat $W/ask_url)
   export ASK_URL=${ASK_URL:-https://internal.netralabs.net/ask}
 fi
 sleep 2
