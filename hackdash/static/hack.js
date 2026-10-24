@@ -161,12 +161,17 @@ async function hls(cam, v, st) {
   if (!window.Hls && !v.canPlayType("application/vnd.apple.mpegurl")) {
     await new Promise((ok, bad) => { const s = document.createElement("script"); s.src = HLS_JS; s.onload = ok; s.onerror = () => bad(new Error("hls.js didn't load")); document.head.append(s); });
   }
+  let fatal;
+  const died = new Promise((_, bad) => fatal = bad);
   if (window.Hls?.isSupported()) {
     const x = st.hls = new Hls({ lowLatencyMode: true, backBufferLength: 10 });
-    x.on(Hls.Events.ERROR, (_, d) => { if (d.fatal && S.st === st) streamFailed(st, `HLS ${d.details}`); });
+    x.on(Hls.Events.ERROR, (_, d) => {
+      if (!d.fatal || S.st !== st) return;
+      if (st.state === "playing") streamFailed(st, `HLS ${d.details}`); else fatal(new Error(`${d.details}${d.response?.code ? ` ${d.response.code}` : ""}`));
+    });
     x.loadSource(url); x.attachMedia(v);
   } else v.src = url;                                 // Safari: native HLS
-  await firstFrame(v, 8000);
+  await Promise.race([firstFrame(v, 8000), died]);
 }
 async function startStream(gen) {
   stopStream();
