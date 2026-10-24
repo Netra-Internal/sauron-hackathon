@@ -11,6 +11,10 @@ What is ours, and writes nothing:
 - POST /calib/fit: the draft fit, with netra-ask's own fitting code (ask/camgeo.py loaded from the netra-ask checkout,
   pure numpy, no DB), the same call sitemap._fit makes on Save. So the leave-one-out error shown while clicking is
   the one netra-ask will store.
+- PTZ cameras (hackdash.ptz): the freeze is the camera's own snapshot with its pan/tilt/zoom read before and after
+  (refused if it moved in between), and on Save that pose is written into site_cameras.frame.ptz (netra-ask's upload
+  route takes no pose; the column is the one netra-ask defines and hackdash.ptz's moved-off-calibration check reads),
+  with an audit row naming the operator.
 - GET /calib/sites/{sid}/cameras/{cid}/people: the live person boxes now (hackdash.live) projected by netra-ask's
   /project with the SAVED calibration: the operator eyeballs the fit against reality.
 """
@@ -19,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import io
+import json
 import logging
 import os
 import secrets
@@ -159,8 +164,22 @@ async def camera_frame(sid: str, cid: str, req: Request, frozen: str):
     f = FROZEN.get(frozen)
     if f is None:
         raise HTTPException(409, "that frozen frame is gone (server restarted?); freeze a new one")
-    return relay(await ask(req, "POST", f"/sites/{sid}/cameras/{cid}/frame",
-                           files={"file": (f"{f['camera_id']}-{f['t_ns']}.jpg", f["jpeg"], "image/jpeg")}))
+    r = await ask(req, "POST", f"/sites/{sid}/cameras/{cid}/frame",
+                  files={"file": (f"{f['camera_id']}-{f['t_ns']}.jpg", f["jpeg"], "image/jpeg")})
+    if r.status_code == 200 and f.get("ptz"):
+        await asyncio.to_thread(record_ptz, sid, cid, f["ptz"], getattr(req.state, "user", None) or "unknown")
+        return {**r.json(), "frame": {**r.json()["frame"], "ptz": f["ptz"]}}
+    return relay(r)
+
+
+def record_ptz(sid: str, cid: str, ptz: dict, user: str):
+    """The PTZ pose the frame was taken at, into site_cameras.frame.ptz (+ netra-ask's audit table, as the operator)."""
+    import psycopg
+    with psycopg.connect(os.environ.get("ASK_DATABASE_URL", "postgresql:///netra_ask"), autocommit=True) as c:
+        c.execute("UPDATE site_cameras SET frame = frame || jsonb_build_object('ptz', %s::jsonb) WHERE site_id=%s AND id=%s",
+                  (json.dumps(ptz), sid, cid))
+        c.execute("INSERT INTO audit (by_user, action, detail) VALUES (%s, 'site.camera.frame.ptz', %s)",
+                  (user, json.dumps({"site": sid, "id": cid, "ptz": ptz, "via": "hack/calib"})))
 
 
 # ---------------------------------------------------------------- frozen frames (drafts, held here only)
@@ -175,10 +194,10 @@ def jpeg_size(data: bytes) -> tuple[int, int]:
     return Image.open(io.BytesIO(data)).size
 
 
-def keep_frozen(camera_id: str, t_ns: int, jpeg: bytes) -> dict:
+def keep_frozen(camera_id: str, t_ns: int, jpeg: bytes, ptz: dict | None = None) -> dict:
     w, h = jpeg_size(jpeg)
     tok = secrets.token_hex(8)
-    FROZEN[tok] = {"camera_id": camera_id, "t_ns": t_ns, "jpeg": jpeg, "width": w, "height": h, "at": time.time()}
+    FROZEN[tok] = {"camera_id": camera_id, "t_ns": t_ns, "jpeg": jpeg, "width": w, "height": h, "at": time.time(), "ptz": ptz}
     while len(FROZEN) > KEEP_FROZEN:
         FROZEN.popitem(last=False)
     return frozen_view(tok)
@@ -188,13 +207,16 @@ def frozen_view(tok: str) -> dict:
     f = FROZEN[tok]
     return {"token": tok, "camera_id": f["camera_id"], "t_ns": str(f["t_ns"]), "width": f["width"], "height": f["height"],
             "captured_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(f["t_ns"] / NS)),
-            "url": f"calib/frozen/{tok}.jpg"}
+            "url": f"calib/frozen/{tok}.jpg", "ptz": f.get("ptz")}
 
 
 @router.post("/freeze/{cam}")
 async def freeze(cam: str, req: Request):
     """The newest live ring frame of a pipeline camera, held as a draft calibration picture. When the ring has none
     (edge down), netra-ask's newest preview of the camera instead (what its own Grab freezes), with its real age."""
+    ptz = _ptz()
+    if ptz and cam in ptz.CAMS:
+        return await freeze_ptz(ptz, cam)
     live = _live()
     live._cam(cam)
     task = live.kick(cam)
@@ -218,6 +240,32 @@ async def freeze(cam: str, req: Request):
     except Exception:
         raise HTTPException(502, "the frame isn't a readable image")
     return {**out, "source": source, "age_s": round(time.time() - t / NS, 1)}
+
+
+def _ptz():
+    try:
+        from hackdash import ptz
+        return ptz
+    except Exception as e:                           # noqa: BLE001 — no PTZ router: freeze as a fixed camera
+        log.warning("hackdash.ptz unavailable: %s", e)
+        return None
+
+
+async def freeze_ptz(ptz, cam: str) -> dict:
+    """The PTZ camera's own snapshot at its current pose; refused if the pose changed while it was taken."""
+    pose = lambda d: {k: float(d[k]) for k in ("pan", "tilt", "zoom")}          # noqa: E731
+    p0 = pose((await ptz.ptzd(cam, "GET", "/position")).json())
+    t = time.time_ns()
+    jpeg = (await ptz.ptzd(cam, "GET", "/snapshot.jpg", {"resolution": f"{ptz.SNAP_W}x{ptz.SNAP_H}"})).content
+    p1 = pose((await ptz.ptzd(cam, "GET", "/position")).json())
+    if abs(p0["pan"] - p1["pan"]) > 0.05 or abs(p0["tilt"] - p1["tilt"]) > 0.05 or abs(p0["zoom"] - p1["zoom"]) > 1:
+        raise HTTPException(409, "the camera was moving while the frame was taken: wait for it to stop and freeze again")
+    zi = ptz.zoom_info(p1["zoom"])
+    try:
+        out = keep_frozen(cam, t, jpeg, {**p1, "hfov": zi.get("hfov_deg"), "zoom_x": zi.get("x")})
+    except Exception:
+        raise HTTPException(502, "the camera's snapshot isn't a readable image")
+    return {**out, "source": "ptz", "age_s": 0.0}
 
 
 @router.get("/frozen/{tok}.jpg")

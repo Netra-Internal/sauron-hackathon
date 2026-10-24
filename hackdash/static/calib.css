@@ -71,3 +71,6 @@
 /* the hook on each camera tile (hack.js) */
 .tile .chip.calib { cursor: pointer; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
 .tile .chip.calib:hover { background: var(--accent); color: var(--accent-ink); }
+#calib .btn.addcam { display: block; width: 100%; text-align: left; margin-bottom: 6px; }
+#calib .btn.small { font-size: 12.5px; padding: 3px 10px; margin: 4px 0; }
+#calib .btn.dangerfill { background: var(--bad); border-color: var(--bad); color: #fff; }
