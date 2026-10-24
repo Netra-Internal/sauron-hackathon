@@ -74,6 +74,8 @@ const C = {
   people: null, peopleErr: null, peopleT: null, fitSeq: 0, fitT: null, saving: false,
   ptzCams: new Set(), ptzSt: null, ptzErr: null, ptzT: null,   // PTZ cameras (hackdash.ptz) and the live pose of this one
 };
+// a camera still at the site centre was never placed ("Add camera" puts it there): the fit can't work from there
+const unplaced = () => C.d && C.site && Math.abs(C.d.model.lat - C.site.lat) < 1e-6 && Math.abs(C.d.model.lon - C.site.lon) < 1e-6;
 const feedOf = () => rec()?.source?.camera_id || C.freezeFrom || C.feed;
 const isPtz = () => C.ptzCams.has(feedOf());
 // = hackdash.ptz calib_check thresholds: off by more than this = a different view
@@ -197,6 +199,7 @@ async function open(feed, tab) {
   try {
     const [r, pz] = await Promise.all([api("/calib/sites"), api("/ptz").catch(() => [])]);
     C.ptzCams = new Set(pz.map(c => c.camera_id));
+    C.serverDraft = await api("/calib/draft").catch(() => null);
     // only feeds with a current picture (the page's camera list, hack.js S.cams) can be frozen from or linked
     const live = new Set((typeof S !== "undefined" && S.cams || []).filter(c => c.live).map(c => c.camera_id));
     C.sites = r.sites; C.liveCams = r.live_cameras.filter(l => live.has(l.id));
@@ -256,6 +259,7 @@ function changed() {
 async function refit() {
   const d = C.d; if (!d) return;
   if (!d.frame || d.points.length < 2) { d.fit = null; d.footprint = null; d.fitting = false; render(); return; }
+  if (unplaced() && d.points.length >= 6 && !d.fit_position) d.fit_position = true;   // never placed: find it from the pairs
   const seq = ++C.fitSeq;
   d.fitting = true; renderState();
   try {
@@ -274,7 +278,11 @@ async function freeze() {
   try {
     const f = await send("POST", `/calib/freeze/${encodeURIComponent(feed)}`);
     d.frame = { kind: "frozen", ...f, from: f.source === "ring" ? `live:${feed}` : f.source === "ptz" ? `${feed} at ${poseTxt(f.ptz)}` : `netra-ask preview of ${feed}`, url: `${API}/${f.url}` };
-    if (f.ptz) toast(`Frozen at ${poseTxt(f.ptz)}. Saving records this position with the calibration.`);
+    if (f.ptz?.hfov) {                             // the lens width at this zoom (hackdash ptz_zoomcal): the fit starts there
+      d.model.hfov = Math.min(150, Math.max(5, f.ptz.hfov));
+      if (f.ptz.hfov < 5) toast(`Zoomed in to ${fx(f.ptz.hfov, 1)}° wide: netra-ask's camera model only goes down to 5°. Zoom out a bit for a calibration it can store.`);
+    }
+    if (f.ptz) toast(`Frozen at ${poseTxt(f.ptz)} (${fx(f.ptz.hfov, 1)}° wide). Saving records this position with the calibration.`);
     if (f.age_s > 60) toast(`${feed}'s live feed has no current frame: froze its newest picture, ${Math.round(f.age_s / 60)} min old. Fine if the camera hasn't moved.`);
     d.redo = [...(d.redo || []), ...d.points.map(({ lat, lon, label }) => ({ lat, lon, label }))];
     d.points = []; d.fit = null; d.footprint = null; C.sel = null; C.pending = null;
@@ -388,6 +396,29 @@ function paneCam(pane) {
   const others = feed ? C.site.cameras.filter(x => x.id !== c.id && x.source?.camera_id === feed && x.calibrated) : [];
   if (others.length) pane.append(h(`<div class="step warn">${others.length + 1} calibrated records link ${esc(feed)}. netra-ask projects its people with the most recently saved one.</div>`));
 
+  const sd = C.serverDraft;
+  if (sd?.points?.length && !d.points.length && !(d.redo || []).length && C.restoredFor !== c.id) {
+    const st = h(`<div class="step">You have an unsaved draft from ${esc(new Date(sd.at * 1000).toLocaleTimeString())}: <b>${sd.points.length} map points</b>. Restore them, then freeze a frame and re-click each one in it. </div>`);
+    st.append(btn("Restore my map points", "primary", () => {
+      C.restoredFor = c.id;
+      d.redo = sd.points.map(({ lat, lon }) => ({ lat, lon }));
+      for (const k of ["lat", "lon", "height_m"]) if (sd.model?.[k] != null && !(k !== "height_m" && Math.abs(sd.model.lat - C.site.lat) < 1e-6 && Math.abs(sd.model.lon - C.site.lon) < 1e-6)) d.model[k] = sd.model[k];
+      d.fit_position = d.fit_position || !!sd.fit_position;
+      changed(); toast("Map points restored: freeze a frame, then click each white marker's spot in it.");
+    }), " ", btn("Dismiss", "", () => { C.restoredFor = c.id; render(); }));
+    pane.append(st);
+  }
+  if (unplaced()) {
+    const st = h(`<div class="step warn"><b>Camera not placed:</b> it sits at the site centre, so no fit can work. Drag the blue marker to where it's mounted, or click Place camera and then the map. With 6+ pairs the position is also found from the pairs. </div>`);
+    st.append(btn(C.mode === "movecam" ? "Click the map…" : "Place camera", "primary", () => { C.mode = "movecam"; hint("Click the map where the camera is mounted · Esc to cancel"); render(); }));
+    pane.append(st);
+  }
+  const fz = d.frame?.ptz;
+  if (fz && C.ptzSt && moved(C.ptzSt, fz)) {
+    const st = h(`<div class="step warn"><b>The camera moved after this frame was frozen</b> (frame: ${esc(poseTxt(fz))}). Freeze a new frame: the map points are kept and you re-click each one in the new picture. </div>`);
+    st.append(btn("Freeze a new frame", "primary", freeze));
+    pane.append(st);
+  }
   // 1 frame
   pane.append(h(`<div class="label"><span>1 · Frame</span></div>`));
   if (d.frame) pane.append(h(`<div class="muted small">${d.frame.kind === "frozen" ? "<b>Draft</b> frame frozen" : "Saved frame"} ${d.frame.width}×${d.frame.height} from ${esc(d.frame.from || "?")}, taken ${esc(ago(d.frame.captured_at))}.${d.frame.ptz && d.frame.kind === "saved" ? ` PTZ position: ${esc(poseTxt(d.frame.ptz))}.` : ""}</div>`));
@@ -433,7 +464,7 @@ function paneCam(pane) {
       pane.append(t);
       pane.append(h(`<div class="muted small" style="margin-top:4px">“checked” = how far that pixel lands from its map point when the fit is redone without it (leave-one-out). Drag a point in the frame or on the map to adjust it.</div>`));
     }
-    const fp = h(`<label class="small" style="display:block;margin-top:8px"><input type="checkbox" ${d.fit_position ? "checked" : ""} ${d.points.length < 6 ? "disabled" : ""}> Also fit the camera position (6+ pairs)</label>`);
+    const fp = h(`<label class="small" style="display:block;margin-top:8px"><input type="checkbox" ${d.fit_position ? "checked" : ""} ${d.points.length < 6 ? "disabled" : ""}> Find the camera position from the pairs too (6+ pairs)</label>`);
     fp.firstElementChild.onchange = e => { d.fit_position = e.target.checked; changed(); };
     pane.append(fp);
   }
@@ -647,6 +678,7 @@ function onMapClick(e) {
   const { lat, lng: lon } = e.lngLat;
   if (C.mode === "boundary") { C.bdraft.push([lat, lon]); render(); }
   else if (C.mode === "place") { C.mode = null; hint(); addCamera(lat, lon, C.placeSource); }
+  else if (C.mode === "movecam" && C.d) { C.mode = null; hint(); C.d.model.lat = lat; C.d.model.lon = lon; changed(); }
   else if (C.mode === "pair") {
     if (C.pending?.u != null) addPair({ ...C.pending, lat, lon });
     else { C.pending = { lat, lon }; hint("Now click the same point in the camera frame"); render(); }

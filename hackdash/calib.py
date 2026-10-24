@@ -25,6 +25,7 @@ import importlib.util
 import io
 import json
 import logging
+import math
 import os
 import secrets
 import sys
@@ -185,6 +186,42 @@ def record_ptz(sid: str, cid: str, ptz: dict, user: str):
 # ---------------------------------------------------------------- frozen frames (drafts, held here only)
 
 FROZEN: OrderedDict[str, dict] = OrderedDict()
+STATE = Path(os.environ.get("HACK_STATE", "/var/lib/sauron-hack")) / "calib"
+DRAFTS: dict[str, dict] = {}          # user -> their last /fit body (+ at): a reload or a redeploy doesn't lose the pairs
+
+
+def _load_state():
+    try:
+        for meta in sorted((STATE / "frozen").glob("*.json"), key=lambda p: p.stat().st_mtime)[-KEEP_FROZEN:]:
+            m = json.loads(meta.read_text())
+            FROZEN[meta.stem] = {**m, "jpeg": meta.with_suffix(".jpg").read_bytes()}
+        f = STATE / "drafts.json"
+        if f.exists():
+            DRAFTS.update(json.loads(f.read_text()))
+    except Exception as e:                           # noqa: BLE001 — a bad state file must not stop the router
+        log.warning("calib state not loaded: %s", e)
+
+
+def _save_frozen(tok: str):
+    try:
+        d = STATE / "frozen"
+        d.mkdir(parents=True, exist_ok=True)
+        f = FROZEN[tok]
+        (d / f"{tok}.jpg").write_bytes(f["jpeg"])
+        (d / f"{tok}.json").write_text(json.dumps({k: v for k, v in f.items() if k != "jpeg"}))
+        for old in sorted(d.glob("*.json"), key=lambda p: p.stat().st_mtime)[:-KEEP_FROZEN]:
+            old.unlink(missing_ok=True); old.with_suffix(".jpg").unlink(missing_ok=True)
+    except OSError as e:
+        log.warning("frozen frame not kept on disk: %s", e)
+
+
+def _save_draft(user: str, body: dict):
+    DRAFTS[user] = {**body, "at": time.time()}
+    try:
+        STATE.mkdir(parents=True, exist_ok=True)
+        (STATE / "drafts.json").write_text(json.dumps(DRAFTS))
+    except OSError as e:
+        log.warning("draft not kept on disk: %s", e)
 
 
 def jpeg_size(data: bytes) -> tuple[int, int]:
@@ -200,6 +237,7 @@ def keep_frozen(camera_id: str, t_ns: int, jpeg: bytes, ptz: dict | None = None)
     FROZEN[tok] = {"camera_id": camera_id, "t_ns": t_ns, "jpeg": jpeg, "width": w, "height": h, "at": time.time(), "ptz": ptz}
     while len(FROZEN) > KEEP_FROZEN:
         FROZEN.popitem(last=False)
+    _save_frozen(tok)
     return frozen_view(tok)
 
 
@@ -292,9 +330,60 @@ def draft_fit(body: dict) -> dict:
     cam0 = camgeo.Camera.of({**model, "width": fw, "height": fh})
     if len(points) < 2:
         return {"model": model, "fit": None, "footprint": None}
+    start = None
+    if fit_position and len(points) >= 6:
+        cam0, start = best_start(cam0, points)
     cam, rep = camgeo.fit(cam0, points, fit_position)
+    if start:
+        rep["start"] = start
     fitted = {k: round(getattr(cam, k), 7 if k in ("lat", "lon") else 4) for k in MODEL_KEYS}
     return {"model": fitted, "fit": rep, "footprint": camgeo.footprint(camgeo.Camera.of({**fitted, "width": fw, "height": fh}))}
+
+
+RING_M = (0, 40, 100)                    # start positions around the pairs' centroid, metres
+HEIGHTS = (6.0, 15.0)
+
+
+def _quick_seed(g, c0, uv, ll, names):
+    """camgeo._seed on a coarser grid (30° yaw, 10° pitch, 3 lens widths): only to rank start positions."""
+    best, bc = None, math.inf
+    for yaw in range(0, 360, 30):
+        for pitch in range(0, 75, 10):
+            for hfov in ((25, 50, 80) if "hfov" in names else (c0.hfov,)):
+                c = g.replace(c0, yaw=float(yaw), pitch=float(pitch), hfov=float(hfov))
+                r = g._resid(c, [], __import__("numpy").array([]), uv, ll)
+                if (cost := r @ r) < bc:
+                    best, bc = c, cost
+    return best
+
+
+def best_start(c0, points: list[dict]):
+    """Multi-start for the camera position: the placed position, plus a ring of positions around the pairs (8 bearings
+    x RING_M) at a few heights. camgeo.fit's own seed searches yaw/pitch/hfov but starts LM from the placed position, so a
+    camera placed far off (e.g. left at the site centre) lands in a wrong minimum. The start with the lowest reprojection
+    cost after a short LM (position free) wins; the full fit + leave-one-out then runs from there."""
+    g = camgeo
+    names = g.free_params(len(points), True)
+    uv = __import__("numpy").array([[p["u"], p["v"]] for p in points], float)
+    ll = [(p["lat"], p["lon"]) for p in points]
+    clat = sum(p["lat"] for p in points) / len(points)
+    clon = sum(p["lon"] for p in points) / len(points)
+    starts = [(c0.lat, c0.lon, c0.height_m, "placed")]
+    for r in RING_M:
+        for b in (range(0, 360, 45) if r else (0,)):
+            la, lo = g.from_en(r * math.sin(math.radians(b)), r * math.cos(math.radians(b)), clat, clon)
+            starts += [(la, lo, hh, f"{r} m {b}° from the pairs") for hh in HEIGHTS]
+    best = None
+    for la, lo, hh, why in starts:
+        c = g.replace(c0, lat=la, lon=lo, height_m=hh)
+        s = _quick_seed(g, c, uv, ll, names)
+        x = g._lm(s, names, g._x0(s, names), uv, ll, iters=25)
+        r = g._resid(s, names, x, uv, ll)
+        cost = float(r @ r)
+        if best is None or cost < best[0]:
+            best = (cost, g._apply(s, names, x), why)
+    c = best[1]
+    return g.replace(c0, lat=c.lat, lon=c.lon, height_m=c.height_m), {"from": best[2], "rms_px": round(math.sqrt(best[0] / (2 * len(points))), 2)}
 
 
 @router.post("/fit")
@@ -303,7 +392,15 @@ async def fit(req: Request):
         body = await req.json()
     except ValueError:
         raise HTTPException(400, "body must be JSON")
+    if body.get("points") and isinstance(body.get("points"), list):
+        _save_draft(getattr(req.state, "user", None) or "unknown", body)
     return await asyncio.to_thread(draft_fit, body)
+
+
+@router.get("/draft")
+async def last_draft(req: Request):
+    """This operator's last draft (the body of their newest /fit): pairs + pose, to restore after a reload."""
+    return DRAFTS.get(getattr(req.state, "user", None) or "unknown") or {}
 
 
 # ---------------------------------------------------------------- live people through the saved calibration
@@ -339,3 +436,6 @@ async def people(sid: str, cid: str, req: Request):
             "people": [{"track_uuid": b["track_uuid"], "box": b["box"], "foot": f, "conf": b.get("conf"),
                         **({"lat": p["lat"], "lon": p["lon"], "radius_m": p["radius_m"]} if p else {"located": False})}
                        for b, f, p in zip(boxes, feet, pts)]}
+
+
+_load_state()
