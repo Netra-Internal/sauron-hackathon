@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# hagent — manage hackathon Claude agents in tmux session "hack".
+#   hagent spawn <name> <dir> [brief-file]   new window running claude --dangerously-skip-permissions in <dir>;
+#                                           if brief given, sends "Read <brief> and do it." once claude is up
+#   hagent send <name> <text...>            type text into the agent and press Enter
+#   hagent peek <name> [lines]              last N lines of the pane (default 40)
+#   hagent ls                               list agents + last line of each
+#   hagent kill <name>
+set -euo pipefail
+S=hack
+cmd=${1:-ls}; shift || true
+ensure() { tmux has-session -t $S 2>/dev/null || tmux new-session -d -s $S -n manager -c "$HOME"; }
+case $cmd in
+  spawn)
+    name=$1 dir=$2 brief=${3:-}; ensure
+    tmux new-window -d -t $S -n "$name" -c "$dir" "claude --dangerously-skip-permissions; exec bash"
+    if [[ -n $brief ]]; then
+      ready=0
+      for i in $(seq 90); do sleep 1; pane=$(tmux capture-pane -p -t "$S:$name")
+        if grep -q 'trust this folder' <<<"$pane"; then tmux send-keys -t "$S:$name" Down; sleep 0.3; tmux send-keys -t "$S:$name" Enter; sleep 2; continue; fi
+        if grep -qi 'Yes, I accept' <<<"$pane"; then tmux send-keys -t "$S:$name" Down; sleep 0.3; tmux send-keys -t "$S:$name" Enter; sleep 2; continue; fi
+        grep -qi 'bypass permissions' <<<"$pane" && { ready=1; break; }
+      done
+      [[ $ready == 1 ]] || { echo "claude in $name not ready after 90 s; brief NOT sent" >&2; exit 1; }
+      sleep 1
+      tmux send-keys -t "$S:$name" -l "You are hackathon agent '$name'. Read ~/hack-2026-10-24/COMMON.md (shared rules), then $brief, and do it."
+      sleep 0.5; tmux send-keys -t "$S:$name" Enter
+    fi
+    echo "spawned $S:$name in $dir" ;;
+  send) name=$1; shift; tmux send-keys -t "$S:$name" -l "$*"; sleep 0.5; tmux send-keys -t "$S:$name" Enter ;;
+  peek) tmux capture-pane -p -t "$S:$1" -S -${2:-40} | grep -v '^\s*$' | tail -${2:-40} ;;
+  ls) ensure; for w in $(tmux list-windows -t $S -F '#W'); do
+        printf '%-14s %s\n' "$w" "$(tmux capture-pane -p -t "$S:$w" | grep -v '^\s*$' | tail -3 | head -1 | cut -c1-110)"; done ;;
+  kill) tmux kill-window -t "$S:$1" ;;
+  *) sed -n 2,9p "$0"; exit 1 ;;
+esac

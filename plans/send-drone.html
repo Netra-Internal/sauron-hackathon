@@ -1,0 +1,147 @@
+<title>Send Drone from the Monitor</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Archivo:wght@600;800&display=swap">
+<style>
+/* Layout: one reading column, ops-briefing style; status chips mirror the real monitor's pills. */
+:root{
+  --bg:#f5f6f4; --panel:#ffffff; --fg:#1b1f1d; --muted:#5d6661; --line:#d9ddd9;
+  --accent:#d6453d; --ok:#1f8a4c; --warn:#b7791f; --off:#7b8480; --code:#eef0ed;
+  --display:"Archivo", "Helvetica Neue", Arial, sans-serif;
+  --body:"IBM Plex Sans", system-ui, sans-serif;
+  --mono:"IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#121514; --panel:#1a1e1c; --fg:#e6e9e6; --muted:#9aa39e; --line:#2c3330;
+  --accent:#f0675f; --ok:#4cc27e; --warn:#e3a94a; --off:#8a938e; --code:#232926; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#121514; --panel:#1a1e1c; --fg:#e6e9e6; --muted:#9aa39e; --line:#2c3330;
+  --accent:#f0675f; --ok:#4cc27e; --warn:#e3a94a; --off:#8a938e; --code:#232926; color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.55}
+.wrap{max-width:960px;margin:0 auto;padding-block:32px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:40px}
+h1,h2{font-family:var(--display);text-wrap:balance;margin:0}
+h1{font-size:2.1rem;font-weight:800;letter-spacing:-.01em}
+h2{font-size:1.3rem;font-weight:600;margin-bottom:12px}
+p{margin:0;max-width:68ch}
+section{display:grid;gap:12px;min-width:0}
+.eyebrow{font-family:var(--mono);font-size:.75rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.lede{font-size:1.08rem;color:var(--fg)}
+.chip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:.74rem;padding:2px 9px;border-radius:999px;border:1px solid var(--line);white-space:nowrap}
+.chip::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.c-ok{color:var(--ok)} .c-no{color:var(--accent)} .c-warn{color:var(--warn)} .c-off{color:var(--off)}
+.tablebox{overflow-x:auto;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+table{border-collapse:collapse;width:100%;font-size:.9rem}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-family:var(--mono);font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}
+tr:last-child td{border-bottom:0}
+td.n{font-family:var(--mono);color:var(--muted);width:1%}
+code,pre{font-family:var(--mono);font-size:.84rem}
+code{background:var(--code);padding:1px 5px;border-radius:4px}
+pre{background:var(--code);padding:14px 16px;border-radius:8px;overflow-x:auto;margin:0;line-height:1.5}
+figure{margin:0;display:grid;gap:8px}
+figure img{border:1px solid var(--line);border-radius:8px;display:block;width:100%;height:auto}
+figcaption{font-size:.85rem;color:var(--muted)}
+.callout{border-left:3px solid var(--accent);padding:10px 14px;background:var(--panel);border-radius:0 8px 8px 0}
+.flow{display:flex;flex-wrap:wrap;gap:6px;align-items:stretch}
+.step{flex:1 1 130px;min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px;display:grid;gap:6px;align-content:start}
+.step b{font-size:.88rem}
+.step span.d{font-size:.78rem;color:var(--muted)}
+ul,ol{margin:0;padding-left:1.2em;display:grid;gap:6px;max-width:72ch}
+.meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+</style>
+
+<div class="wrap">
+
+<header style="display:grid;gap:12px">
+  <div class="eyebrow">Sauron hackathon · plan · Oct 24 2026, 14:15 PDT</div>
+  <h1>Send a drone from the monitor</h1>
+  <p class="lede">The Sites monitor we already have, with one addition: open a camera, see a box on every person with Sauron's real suspicion, click <b>Send drone</b> on one, and the drone launches to that person.</p>
+  <div class="meta">
+    <span class="chip c-ok">1 camera usable: jetson-c920</span>
+    <span class="chip c-no">dispatch code not deployed</span>
+    <span class="chip c-no">no person boxes in the UI yet</span>
+    <span class="chip c-warn">drone flies to the point, does not follow yet</span>
+  </div>
+</header>
+
+<section>
+  <h2>What changes on screen</h2>
+  <p>Nothing else in the monitor changes. The addition lives in the camera lightbox (the view you get by clicking a camera tile twice).</p>
+  <figure>
+    <img src="monitor-now.jpg" alt="Sites monitor today: incident queue on the left, UCSD satellite map with fused people dots in the centre, Camera 1 tile on the right">
+    <figcaption>Today, 14:13 PDT, UCSD DIB site. People are only dots on the map; the camera tile shows a still preview about 30 s old.</figcaption>
+  </figure>
+  <figure>
+    <img src="sketch.jpg" alt="Camera 1 lightbox with a sketched person box, its label chip, and a red Send drone button">
+    <figcaption>Sketch of the addition (the orange box is drawn by hand, not a detection). Live frame at about 1 fps, every edge person box on a canvas, chip = track id · confidence · suspicion, then Send drone.</figcaption>
+  </figure>
+  <ul>
+    <li><b>Live view:</b> a ring frame from the Jetson about once a second, with the edge YOLO person boxes from that exact moment drawn over it. The picture runs about 2.5–3 s behind live, and the screen says so.</li>
+    <li><b>Label on each box:</b> the person Jev pointed at in an open incident shows its verdict colour, reason, E, top facts and caption. Every other box shows <code>—</code>. Jev scores a clip and picks one subject; there is no per-person score, so we don't invent one. With the judge off, all boxes show <code>—</code> and a "judge off" banner.</li>
+    <li><b>Send drone:</b> an inline "Send drone to #id? Yes / Cancel", then the new incident opens in the left pane (queue, Forwarded, map pin) and the chip turns red.</li>
+    <li><b>Abort drone:</b> a button on an open, forwarded incident in the left pane. The API already exists; without the button the only recall is waiting for the person to leave view.</li>
+  </ul>
+  <p class="callout">The click is an extra trigger. Sauron's own launches stay autonomous with no approval step. If both fire on the same person, the drone takes the first and refuses the second as busy.</p>
+</section>
+
+<section>
+  <h2>The path from camera to drone</h2>
+  <div class="flow">
+    <div class="step"><span class="chip c-ok">running</span><b>Camera RTSP</b><span class="d">jetson-c920, 1080p, 5 fps</span></div>
+    <div class="step"><span class="chip c-ok">running</span><b>Jetson edge</b><span class="d">YOLO person boxes + track ids, 70 ms, flush 1 s</span></div>
+    <div class="step"><span class="chip c-ok">running</span><b>Droplet sitefuse</b><span class="d">people on the map, lat/lon, 1 Hz</span></div>
+    <div class="step"><span class="chip c-off">paused</span><b>Dispatch judge</b><span class="d">Jev every 2 s, facts + one subject box, ≈$0.66/h</span></div>
+    <div class="step"><span class="chip c-no">old code</span><b>Incident + signed webhook</b><span class="d">PRs #1–#8 merged, not on the droplet</span></div>
+    <div class="step"><span class="chip c-warn">PR #21 open</span><b>sauron_link on dwone</b><span class="d">launches on a signed live deploy with lat/lon</span></div>
+    <div class="step"><span class="chip c-warn">sim only</span><b>Mission node</b><span class="d">PX4, flies to the point</span></div>
+  </div>
+</section>
+
+<section>
+  <h2>What a click sends</h2>
+<pre>POST /ask/api/dispatch/launch          (internal login, audited)
+{"camera_id": "jetson-c920", "track_uuid": "&lt;box.track_uuid&gt;", "t_ns": &lt;frame time&gt;}
+
+200 {"id": "jetson-c920-op-…", "located": true, "lat": …, "lon": …,
+     "loc_source": "sitefuse", "site_track_id": "…", "already_dispatched": false}
+409 "person no longer tracked" | "no dispatch webhook is configured"</pre>
+  <p>The server builds a live <code>deploy</code> incident with reason <code>operator_launch</code>, grabs the frame and crop, and hands it to the existing <code>store.accept</code>. That binds the person to their site track, takes the location from sitefuse <i>now</i> (which absorbs the 2–3 s display lag), signs and sends <code>netra.dispatch.incident</code>, and starts the 1 Hz position stream. A small loop closes it as <code>subject_lost</code> when the person is gone 30 s, which sends <code>end</code> to the drone.</p>
+</section>
+
+<section>
+  <h2>Build split</h2>
+  <div class="tablebox"><table>
+    <thead><tr><th>Item</th><th>Who</th><th>Files</th><th>Est.</th></tr></thead>
+    <tbody>
+      <tr><td><b>W1</b> live boxes API</td><td>agent</td><td><code>ask/sitefuse.py</code> (boxes per camera), new <code>ask/livecam.py</code>, <code>GET /api/cameras/{cam}/live</code> + <code>frame.jpg</code></td><td>3 h</td></tr>
+      <tr><td><b>W2</b> operator launch</td><td>agent</td><td>new <code>ask/dispatch/operator.py</code>, <code>POST /api/dispatch/launch</code>, lifecycle loop</td><td>3 h</td></tr>
+      <tr><td><b>W3</b> monitor addition</td><td>agent</td><td><code>ask/static/monitor.js</code> (<code>openCamera</code>, <code>renderDetail</code>) + a few CSS rules</td><td>2.5 h</td></tr>
+      <tr><td><b>W4</b> deploy + ops</td><td>manager</td><td>droplet to main, env (webhook URL, secret, drone token), Jetson watcher for the demo window</td><td>1 h</td></tr>
+      <tr><td><b>W5</b> drone receiver</td><td>Pranay</td><td>sauron_link listening on 0.0.0.0:8765, reachable from the droplet, same secret + token, SITL running. No code needed for fly-to-point</td><td>≈1 h</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <h2>Decisions for William</h2>
+  <ol>
+    <li><b>Camera.</b> jetson-c920 is the only camera that is both live and calibrated (8.7 m error). It's the desk test rig. Demo on it with a "test rig" label, or no live demo. The Axis has had RTSP refused for 2+ days and is uncalibrated; node3 is offline.</li>
+    <li><b>Deploy the droplet to main now.</b> With no webhook URL set, nothing is sent; it creates the tables and endpoints.</li>
+    <li><b>How the droplet reaches dwone.</b> The tailnet ACL lets the droplet SSH to the Jetson only. Either open flywheel-01 → dwone:8765 or give sauron_link a public HTTPS endpoint.</li>
+    <li><b>Jetson memory (optional).</b> Stopping the two dead edge units (Axis, node3; 0 frames for days) frees about 1.9 GB for the judge.</li>
+  </ol>
+</section>
+
+<section>
+  <h2>Rehearsal order</h2>
+  <ol>
+    <li>Deploy; send a signed test incident from the droplet to sauron_link; see the goal arrive in SITL.</li>
+    <li>Open Camera 1 with someone on the walkway: boxes line up, lag reads ≤ 3 s. Stage people on the walkway or road, not the far field (10–40 px tall there).</li>
+    <li>Click Send drone → incident with <code>loc_source=sitefuse</code> → forwarded 2xx → SITL drone takes off → positions streaming. Measure click-to-drone time; it has never been measured.</li>
+    <li>Abort → <code>end</code> reaches SITL.</li>
+    <li>Start the judge, stage a bike-tampering break-in: the box turns amber/red with real facts and launches with no click.</li>
+    <li>Person walks out of view → incident closes <code>subject_lost</code> within about 30 s and sends <code>end</code>.</li>
+  </ol>
+  <p style="color:var(--muted);font-size:.88rem">In the demo, say "flies to the launch point". sauron_link accepts the position stream but does not steer by it yet.</p>
+</section>
+
+</div>
