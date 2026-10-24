@@ -91,6 +91,9 @@ img.qthumb { object-fit: cover; background: #000; }
 #frameinner { position: relative; line-height: 0; }
 #frame { display: block; max-width: 100%; max-height: calc(100vh - 54px - 38px); user-select: none; -webkit-user-drag: none; }
 #boxes { position: absolute; inset: 0; pointer-events: none; }
+#vid { display: block; max-width: 100%; max-height: calc(100vh - 54px - 38px); background: #000; }
+.spin { display: inline-block; width: 14px; height: 14px; margin-right: 8px; vertical-align: -2px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 #chips { position: absolute; inset: 0; pointer-events: none; line-height: 1.4; }
 .empty { color: #9aa0aa; text-align: center; padding: 30px; max-width: 460px; line-height: 1.5; }
 

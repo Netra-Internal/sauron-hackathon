@@ -116,7 +116,95 @@ function openCamera(id) {
   history.replaceState(null, "", `#cam=${encodeURIComponent(id)}`);
   $("#frameinner").classList.add("hidden");
   renderWall(); renderStage();
+  startStream(S.gen);
   liveTick(S.gen);
+}
+
+// ------------------------------------------------------------------ live video (WHEP, else LL-HLS); the ring JPEGs are the fallback
+// The pod stream at /hack/stream/<cam>/{whep,index.m3u8}. While it plays, /live is only polled for the newest boxes.
+const STREAM = cam => `/hack/stream/${encodeURIComponent(cam)}`;
+const HLS_JS = "https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.20/hls.min.js";
+S.st = { state: "off" };                          // state: starting | playing | failed; mode: whep | hls
+function stopStream() {
+  const st = S.st, v = $("#vid");
+  clearTimeout(st.retry); clearInterval(st.watch);
+  st.hls?.destroy(); st.pc?.close();
+  if (st.whepAt) fetch(st.whepAt, { method: "DELETE", credentials: "same-origin" }).catch(() => {});
+  v.onerror = null; v.removeAttribute("src"); v.srcObject = null; v.load(); v.classList.add("hidden"); $("#frame").classList.remove("hidden");
+  S.st = { state: "off" };
+}
+function firstFrame(v, ms) {
+  return new Promise((ok, bad) => {
+    const t = setTimeout(() => { done(); bad(new Error("no picture")); }, ms);
+    const on = () => { if (v.videoWidth) { done(); ok(); } };
+    const done = () => { clearTimeout(t); v.removeEventListener("playing", on); v.removeEventListener("loadeddata", on); };
+    v.addEventListener("playing", on); v.addEventListener("loadeddata", on);
+    v.play().catch(() => {});
+  });
+}
+async function whep(cam, v, st) {
+  const pc = st.pc = new RTCPeerConnection();
+  pc.addTransceiver("video", { direction: "recvonly" });
+  pc.ontrack = e => { if (e.track.kind === "video") v.srcObject = e.streams[0] || new MediaStream([e.track]); };
+  pc.onconnectionstatechange = () => { if (["failed", "disconnected", "closed"].includes(pc.connectionState) && S.st === st && st.state === "playing") streamFailed(st, `WebRTC ${pc.connectionState}`); };
+  await pc.setLocalDescription(await pc.createOffer());
+  await new Promise(ok => { if (pc.iceGatheringState === "complete") ok(); pc.onicegatheringstatechange = () => pc.iceGatheringState === "complete" && ok(); setTimeout(ok, 1500); });
+  const res = await fetch(`${STREAM(cam)}/whep`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/sdp" }, body: pc.localDescription.sdp });
+  if (!res.ok) throw new Error(`WHEP ${res.status}`);
+  const loc = res.headers.get("Location");
+  if (loc) st.whepAt = new URL(loc, location.href).href;
+  await pc.setRemoteDescription({ type: "answer", sdp: await res.text() });
+  await firstFrame(v, 4000);
+}
+async function hls(cam, v, st) {
+  const url = `${STREAM(cam)}/index.m3u8`;
+  // hls.js (lowLatencyMode) wherever MSE exists; the browser's own HLS only without it (iPhone Safari)
+  if (!window.Hls) await new Promise(ok => { const s = document.createElement("script"); s.src = HLS_JS; s.onload = s.onerror = ok; document.head.append(s); });
+  let fatal;
+  const died = new Promise((_, bad) => fatal = bad);
+  if (window.Hls?.isSupported()) {
+    const x = st.hls = new Hls({ lowLatencyMode: true, backBufferLength: 10 });
+    x.on(Hls.Events.ERROR, (_, d) => {
+      if (!d.fatal || S.st !== st) return;
+      if (st.state === "playing") streamFailed(st, `HLS ${d.details}`); else fatal(new Error(`${d.details}${d.response?.code ? ` ${d.response.code}` : ""}`));
+    });
+    x.loadSource(url); x.attachMedia(v);
+  } else if (v.canPlayType("application/vnd.apple.mpegurl")) {
+    v.onerror = () => { if (S.st !== st) return; if (st.state === "playing") streamFailed(st, "HLS error"); else fatal(new Error("HLS error")); };
+    v.src = url;
+  } else throw new Error("no HLS player");
+  await Promise.race([firstFrame(v, 8000), died]);
+}
+async function startStream(gen) {
+  stopStream();
+  const cam = S.cam, v = $("#vid"), st = S.st = { state: "starting" };
+  renderStage();
+  for (const [mode, fn] of [["whep", whep], ["hls", hls]]) {
+    try {
+      await fn(cam, v, st);
+      if (gen !== S.gen || S.st !== st) return;
+      st.state = "playing"; st.mode = mode;
+      v.classList.remove("hidden"); $("#frame").classList.add("hidden"); $("#frameinner").classList.remove("hidden");
+      // a picture that stops moving for 5 s is a failed stream: fall back to the ring and try again later
+      let last = -1, still = 0;
+      st.watch = setInterval(() => { if (document.hidden) return; if (v.currentTime === last) { if (++still >= 5) streamFailed(st, "video froze"); } else { still = 0; last = v.currentTime; } }, 1000);
+      drawBoxes(); renderStage();
+      return;
+    } catch (err) {
+      if (gen !== S.gen || S.st !== st) return;
+      st.why = `${mode}: ${err.message}`;
+      st.pc?.close(); st.pc = null; st.hls?.destroy(); st.hls = null;
+      v.removeAttribute("src"); v.srcObject = null;
+    }
+  }
+  streamFailed(st, st.why);
+}
+function streamFailed(st, why) {
+  if (S.st !== st) return;
+  const gen = S.gen;
+  stopStream();
+  S.st = { state: "failed", why, retry: setTimeout(() => { if (gen === S.gen) startStream(gen); }, 15000) };
+  renderStage();
 }
 const frameUrl = u => /^(https?:)?\//.test(u) ? u : `${API}/${u}`;
 async function liveTick(gen) {
@@ -130,7 +218,8 @@ async function liveTick(gen) {
     const r = JSON.parse(text);
     r.t_ns = rawTns(text) || String(r.t_ns);
     if (gen !== S.gen) return;
-    if (r.frame_url) {
+    if (S.st.state === "playing") {}                // the video is the picture; only the boxes are new
+    else if (r.frame_url) {
       // show the frame and its boxes together: preload the JPEG, then swap it in and draw the payload it belongs to
       const img = new Image();
       img.alt = "Live camera frame";
@@ -139,7 +228,7 @@ async function liveTick(gen) {
       img.id = "frame";
       $("#frame").replaceWith(img);
       $("#frameinner").classList.remove("hidden");
-    } else $("#frameinner").classList.add("hidden");
+    } else if (S.st.state !== "playing") $("#frameinner").classList.add("hidden");
     S.live = r; S.liveErr = null; S.liveAt = Date.now();
     drawBoxes(); renderStage(); renderTop();
   } catch (err) {
@@ -147,22 +236,26 @@ async function liveTick(gen) {
     S.liveErr = err.status === 404 && !S.live ? "The live-view API (hackdash.live) isn't deployed yet, or doesn't know this camera." : err.message;
     renderStage();
   }
-  setTimeout(() => liveTick(gen), Math.max(150, 1000 - (performance.now() - t0)));
+  setTimeout(() => liveTick(gen), Math.max(150, (S.st.state === "playing" ? 500 : 1000) - (performance.now() - t0)));
 }
 function renderStage() {
   const c = camOf(S.cam), r = S.live, nf = $("#noframe");
   const chips = [];
   if (c?.test_rig) chips.push(`<span class="chip test">test rig</span>`);
   if (r) {
-    chips.push(`<span class="chip">≈${fx(r.lag_s, 1)} s behind live</span>`);
+    if (S.st.state === "playing") chips.push(`<span class="chip green" title="the camera's video stream (${esc(S.st.mode)})">live video</span>`);
+    chips.push(`<span class="chip">${S.st.state === "playing" ? "boxes " : ""}≈${fx(r.lag_s, 1)} s behind live</span>`);
     chips.push(r.judge_on ? `<span class="chip green">judge on</span>` : `<span class="chip amber">judge off</span>`);
     chips.push(`<span class="chip">${r.boxes.length} ${r.boxes.length === 1 ? "person" : "people"} in view</span>`);
   }
+  if (S.st.state === "failed") chips.push(`<span class="chip amber" title="${esc(S.st.why || "")}">video stream down · showing stills</span>`);
   if (S.liveErr && r) chips.push(`<span class="chip red" title="${esc(S.liveErr)}">frame ${Math.round((Date.now() - S.liveAt) / 1e3)} s old · retrying</span>`);
   $("#camcap").innerHTML = c ? `<b>${esc(c.name || c.camera_id)}</b> · ${c.live ? `Live${c.fps != null ? ` · ${fx(c.fps, 1)} fps` : ""}` : "Not live"}` : "";
   $("#lag").innerHTML = `<span class="row">${chips.join("")}</span>`;
   let msg = "";
   if (!S.cam) msg = S.camErr ? esc(S.camErr) : "Open a camera on the right to see it live with a box on every person.";
+  else if (S.st.state === "playing") msg = "";
+  else if (S.st.state === "starting" && !r?.frame_url) msg = `<span class="spin"></span>Starting live video…`;
   else if (!r) msg = S.liveErr ? esc(S.liveErr) : "Connecting to the live frame…";
   else if (!r.frame_url) msg = "No frame from the camera's ring right now.";
   nf.innerHTML = msg; nf.classList.toggle("hidden", !msg);
@@ -184,13 +277,14 @@ function boxKind(b) {
 }
 const COLOR = { sent: "#ef5b50", deploy: "#ef5b50", watch: "#e0a43a", none: "#2fbf71" };
 function drawBoxes() {
-  const r = S.live, img = $("#frame"), cv = $("#boxes");
-  if (!r || !r.frame_url || !img.naturalWidth) return;
+  const r = S.live, vid = S.st.state === "playing", img = vid ? $("#vid") : $("#frame"), cv = $("#boxes");
+  const nw = vid ? img.videoWidth : img.naturalWidth, nh = vid ? img.videoHeight : img.naturalHeight;
+  if (!r || (!vid && !r.frame_url) || !nw) return;
   const w = img.clientWidth, hh = img.clientHeight, dpr = window.devicePixelRatio || 1;
   cv.width = Math.round(w * dpr); cv.height = Math.round(hh * dpr); cv.style.width = `${w}px`; cv.style.height = `${hh}px`;
   const g = cv.getContext("2d");
   g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, hh);
-  const sx = w / (r.src_w || img.naturalWidth), sy = hh / (r.src_h || img.naturalHeight);
+  const sx = w / (r.src_w || nw), sy = hh / (r.src_h || nh);
   const seen = new Set();
   const boxes = r.boxes.map(b => ({ b, t_ns: r.t_ns }));
   // a person being confirmed keeps their chip at the last place they were seen, so the click isn't yanked away
