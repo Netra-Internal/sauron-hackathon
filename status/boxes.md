@@ -1,4 +1,21 @@
-DONE: hackdash/live.py (branch hack-boxes, 824d48b) returned real jetson-c920 person boxes on the droplet; frame and boxes share one t; lag about 3-7 s. Needs one nginx mirror applied by the manager.
+DONE: relay LIVE at https://internal.netralabs.net/hack/relay (deployed 22:21 UTC, hack-boxes 815cbbf, merged with origin/main). Agent cloud can point the RunPod edge's ask base URL there now.
+
+## Relay (22:21 UTC)
+- POST /hack/relay/api/edge/bucket: checks the worker token (bad token -> 401), spools the raw request to /var/lib/sauron-hack/relay (netra, 700),
+  feeds live.OBS and answers 200 at once. One background worker forwards to http://127.0.0.1:8400/ask/api/edge/bucket (not through nginx,
+  so no mirror loop) in order, with the same body, content-type and Authorization. Backoff 1/2/5/10/30 s, retrying forever.
+  A permanent 4xx from netra-ask moves the bucket to relay/rejected/; nothing is deleted unforwarded. Over 2000 MB of spool -> 503,
+  so the edge keeps the bucket. Backlog is logged in journalctl -u sauron-hack ("relay: backlog N").
+- GET /hack/relay/api/edge/config and POST /hack/relay/api/edge/heartbeat: synchronous pass-through.
+  Verified on the public URL with the real token: config 200 in 0.53 s.
+- GET /hack/relay/status (internal login): backlog, oldest_age_s, forwarded, retries, rejected, last_error.
+- The Jetson mirror path /hack/api/_edge/bucket is unchanged (feed only).
+- Tested locally against a fake slow, flaky netra-ask (0.3 s per POST, 25% 503s): 20 buckets were answered in 0.64 s total and all 20 arrived
+  in order after 4 retries.
+- REAL buckets, 22:23 UTC: the RunPod edge (63.141.33.141) posts buckets about 1/s plus heartbeats; every one got 200 at once.
+  28 were forwarded to netra-ask in 30 s, the backlog stayed at 0-3 (0.2 MB), 0 were rejected, and the netra-ask journal shows the ingests.
+- app.py: a minimal edit. It mounts hackdash.relay at /hack/relay and adds the 3 relay edge paths to NO_LOGIN.
+
 
 ## For the manager (re your deploy message)
 - PUSHED: origin/hack-boxes 824d48b (live.py, nginx snippet, tests). The names launch.py imports are unchanged: OBS.by_cam (5-tuple t, uuid, box, conf, kind;
