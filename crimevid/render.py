@@ -217,13 +217,13 @@ def render(d: Path, weights: str):
         g.text((x0, 180), "Jev facts (newest 4-frame strip, every 2 s)", font=fb[12], fill=(200, 200, 210))
         for i, name in enumerate(FACTS):
             y = 200 + i * 19
-            p = cur["facts"][name] if cur else 0.0
+            p = (cur["facts"].get(name) or 0.0) if cur else 0.0
             g.text((x0, y), name.replace("_", "-"), font=f[13], fill=(220, 220, 225))
             col = (90, 170, 90) if name == "normal" else ((230, 70, 50) if p >= pol["danger_p"] else (170, 120, 60))
             bar(g, x0 + 92, y + 3, bw - 140, 11, p, col)
             g.text((CW - 44, y), f"{p:.2f}", font=f[13], fill=(220, 220, 225))
         y = 200 + len(FACTS) * 19 + 4
-        if cur and cops and cur["facts"]["weapon"] >= 0.3:
+        if cur and cops and (cur["facts"].get("weapon") or 0.0) >= 0.3:
             armed = [(c, cop(c, t)[1] or 0.0) for c in sorted(cops)]
             sa = cop(sid, t)[1] if sid is not None else None
             note = "weapon: police officer " + ", ".join(f"#{c} (armed {a:.2f})" for c, a in armed[:2])

@@ -43,6 +43,8 @@ def main(out: Path, page: Path):
         shutil.copy(d / "annotated.mp4", page / "v" / f"{cid}.mp4")
         url, what = SRC[cid]
         tok = tl["stats"]["jev"]["input_tokens"]
+        if (d / "police.json").exists():                 # the police-label calls count too
+            tok += json.loads((d / "police.json").read_text())["jev"]["input_tokens"]
         total_tok += tok
         dep, ev0, ev1 = tl["deploy_t"], tl["event_s"], tl["event_end_s"]
         verdicts = [s["verdict"] for s in tl["strips"]]
@@ -108,5 +110,6 @@ if __name__ == "__main__":
     (page / "index.html").write_text(tpl.replace("{{ROWS}}", "\n".join(rows)).replace("{{CARDS}}", "\n".join(cards))
                                      .replace("{{CAUGHT}}", f"{s['n_caught']} of {s['n_crime']}")
                                      .replace("{{FP}}", f"{s['n_fp']} of {s['n_benign']}")
-                                     .replace("{{COST}}", f"${s['cost']:.2f}"))
+                                     .replace("{{COST}}", f"${s['cost']:.2f}")
+                                     .replace("{{SUMMARY}}", (Path(__file__).parent / "summary.html").read_text()))
     print(s)
