@@ -1,7 +1,7 @@
 // Move camera (hackdash/ptz.py): a full-screen screen over the send-drone page for a PTZ camera (the Axis), loaded on
 // first use by hack.js. The camera's own JPEG refreshes as fast as it loads; click it to centre there (shift-click = also
 // zoom in 2x). Hold the arrow pad / zoom buttons (or arrow keys, + / -): /move is re-sent every 250 ms while held, and the
-// camera's ptzd stops by itself if that stops (0.8 s deadman). Release = /stop at once.
+// camera's ptzd stops by itself if that stops (1.2 s deadman). Release = /stop at once.
 (() => {
 const API = "/hack/api";
 const $ = s => root.querySelector(s);
@@ -15,7 +15,7 @@ async function api(path, opts = {}) {
 }
 const post = (path, body) => api(path, { method: "POST", body: JSON.stringify(body || {}) });
 
-const P = { cam: null, open: false, st: null, err: null, held: { pan: 0, tilt: 0, zoom: 0 }, timer: null, speed: 0.5,
+const P = { cam: null, open: false, st: null, err: null, held: { pan: 0, tilt: 0, zoom: 0 }, timer: null, speed: 0.15,
             ms: [], snapGen: 0, snapAt: 0 };
 let root = null;
 
@@ -35,7 +35,7 @@ function build() {
         <span></span><button class="btn" data-m="0,-1,0" title="Tilt down (↓)">▼</button><span></span>
       </div>
       <div class="p-zoom"><button class="btn" data-m="0,0,-1" title="Zoom out (−)">− Zoom out</button><button class="btn" data-m="0,0,1" title="Zoom in (+)">+ Zoom in</button></div>
-      <label class="small">Speed <input type="range" id="p-speed" min="0.05" max="1" step="0.05" value="0.5"> <span id="p-speedv" class="mono"></span></label>
+      <label class="small">Speed <input type="range" id="p-speed" min="0.02" max="1" step="0.01" value="0.15"> <span id="p-speedv" class="mono"></span></label>
       <div class="p-home"><button class="btn" id="p-goto">Go Home</button><button class="btn" id="p-save">Save as Home</button></div>
       <div id="p-note" class="small"></div>
     </div>`;
@@ -99,7 +99,7 @@ async function release(always) {
   clearInterval(P.timer); P.timer = null; P.held = { pan: 0, tilt: 0, zoom: 0 }; keysDown.clear();
   if (!was && !always) return;
   try { const t0 = performance.now(); const r = await post(`/ptz/${encodeURIComponent(P.cam)}/stop`); lat(performance.now() - t0, r.ms); }
-  catch (err) { P.err = `Stop failed: ${err.message} (the camera stops by itself within 0.8 s)`; renderNote(); }
+  catch (err) { P.err = `Stop failed: ${err.message} (the camera stops by itself within 1.2 s)`; renderNote(); }
 }
 async function cmd(path, msg, body) {
   try { const t0 = performance.now(); const r = await post(`/ptz/${encodeURIComponent(P.cam)}${path}`, body); lat(performance.now() - t0, r.ms); toast(msg); }

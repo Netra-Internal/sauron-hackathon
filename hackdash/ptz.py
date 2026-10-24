@@ -2,7 +2,7 @@
 
 Each PTZ camera has a ptzd (ptzd/ptzd.py) on the box next to it, reached through an SSH tunnel on a droplet loopback
 port (PTZ_CAMS="axis-q6215=http://127.0.0.1:8530"). ptzd only knows a fixed set of commands and stops any continuous move
-that is not refreshed within 0.8 s. So the page re-sends /move every 250 ms while a button is held, and a lost release
+that is not refreshed within 1.2 s. So the page re-sends /move every 250 ms while a button is held, and a lost release
 cannot leave the camera turning.
 
 Calibration: netra-ask maps pixels to the ground for a PTZ camera only at the pose it was calibrated in (site_cameras
