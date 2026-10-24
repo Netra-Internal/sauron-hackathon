@@ -1,0 +1,16 @@
+[Unit]
+Description=droplink: stand-in drone receiver for netra-ask's signed dispatch webhook (sauron-hackathon)
+After=network-online.target
+
+[Service]
+User=netra
+Group=netra
+WorkingDirectory=/opt/netra/droplink
+EnvironmentFile=/etc/droplink.env
+ExecStart=/usr/bin/python3 -I /opt/netra/droplink/droplink.py --listen 127.0.0.1:8510 --db /var/lib/droplink/messages.sqlite
+StateDirectory=droplink
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
