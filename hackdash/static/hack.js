@@ -25,7 +25,10 @@ async function api(path, opts = {}) {
   if (!r.ok) { let m = `${r.status}`; try { m = (await r.json()).detail || m; } catch {} throw Object.assign(new Error(m), { status: r.status }); }
   return r.status === 204 ? null : r.json();
 }
-const post = (path, body) => api(path, { method: "POST", body: JSON.stringify(body || {}) });
+const post = (path, body) => api(path, { method: "POST", body: typeof body === "string" ? body : JSON.stringify(body || {}) });
+// t_ns (~1.8e18) doesn't fit a JS number exactly, and launch matches the clicked obs on the exact t: keep it as the
+// digit string from the raw JSON and write it back unquoted
+const rawTns = text => text.match(/"t_ns"\s*:\s*(\d+)/)?.[1];
 
 const S = {
   cams: null, camErr: null, cam: null,            // camera list, its error, the open camera id
@@ -53,7 +56,7 @@ async function pollCams() {
 const camOf = id => S.cams?.find(c => c.camera_id === id);
 function renderWall() {
   const wall = $("#wall");
-  const cams = S.cams || [];
+  const cams = (S.cams || []).slice().sort((a, b) => b.live - a.live);   // live cameras first
   wall.innerHTML = "";
   wall.append(h(`<div class="whead"><h2>Cameras</h2><span class="muted small">${S.cams ? `${cams.filter(c => c.live).length} of ${cams.length} live` : ""}</span></div>`));
   if (S.camErr || !cams.length) {
@@ -63,14 +66,15 @@ function renderWall() {
   for (const c of cams) {
     const open = S.cam === c.camera_id;
     // the open camera shows its newest live frame; the others the edge preview netra-ask already serves (~30 s old)
-    const src = open && S.live?.frame_url ? frameUrl(S.live.frame_url) : `/ask/api/preview/${encodeURIComponent(c.camera_id)}.jpg?m=${Math.floor(Date.now() / 30e3)}`;
+    // a camera that isn't live shows no picture: its last preview can be days old
+    const src = !c.live ? null : open && S.live?.frame_url ? frameUrl(S.live.frame_url) : `/ask/api/preview/${encodeURIComponent(c.camera_id)}.jpg?m=${Math.floor(Date.now() / 30e3)}`;
     const t = h(`<button class="tile ${open ? "sel" : ""}"><div class="tframe"><img alt=""><div class="tnone hidden">No picture yet</div>
       <div class="tover"><i class="${c.live ? "live" : "down"}"></i><span>${esc(c.name || c.camera_id)}</span></div></div>
       <div class="tinfo"><div class="tstate">${c.live ? `Live${c.fps != null ? ` · ${fx(c.fps, 1)} fps` : ""}` : "Not live"}${open ? " · open" : ""}</div>
       <div class="tchips">${c.test_rig ? `<span class="chip test">test rig</span>` : ""}${c.calibrated ? `<span class="chip">On the map</span>` : `<span class="chip amber">Not calibrated</span>`}</div></div></button>`);
     const img = t.querySelector("img");
     img.onerror = () => { img.classList.add("hidden"); t.querySelector(".tnone").classList.remove("hidden"); };
-    img.src = src;
+    if (src) img.src = src; else { img.classList.add("hidden"); t.querySelector(".tnone").classList.remove("hidden"); t.querySelector(".tnone").textContent = "Not live: no current picture"; }
     t.onclick = () => openCamera(c.camera_id);
     wall.append(t);
   }
@@ -91,7 +95,12 @@ async function liveTick(gen) {
   if (gen !== S.gen) return;
   const t0 = performance.now();
   try {
-    const r = await api(`/cameras/${encodeURIComponent(S.cam)}/live`);
+    const res = await fetch(`${API}/cameras/${encodeURIComponent(S.cam)}/live`, { credentials: "same-origin" });
+    if (res.status === 401) { location.href = "/map/login?next=/hack/"; return; }
+    const text = await res.text();
+    if (!res.ok) { let m = `${res.status}`; try { m = JSON.parse(text).detail || m; } catch {} throw Object.assign(new Error(m), { status: res.status }); }
+    const r = JSON.parse(text);
+    r.t_ns = rawTns(text) || String(r.t_ns);
     if (gen !== S.gen) return;
     if (r.frame_url) {
       // show the frame and its boxes together: preload the JPEG, then swap it in and draw the payload it belongs to
@@ -137,7 +146,7 @@ function openInc(id) { const x = id && S.inc.get(id); return x && x.status !== "
 function sentInc(b) {
   const mine = openInc(S.sentByTrack.get(b.track_uuid));
   if (mine) return mine;
-  if (b.site_track_id) for (const x of S.inc.values()) if (x.status !== "closed" && x.site_track_id === b.site_track_id) return x;
+  for (const x of S.inc.values()) if (x.status !== "closed" && (x.edge_track === b.track_uuid || (b.site_track_id && x.site_track_id === b.site_track_id))) return x;
   return null;
 }
 function boxKind(b) {
@@ -205,7 +214,7 @@ async function launch(tu) {
   const t_ns = cur ? S.live.t_ns : p.t_ns;
   p.state = "sending"; drawBoxes();
   try {
-    const r = await post("/launch", { camera_id: S.cam, track_uuid: tu, t_ns });
+    const r = await post("/launch", `{"camera_id": ${JSON.stringify(S.cam)}, "track_uuid": ${JSON.stringify(tu)}, "t_ns": ${/^\d+$/.test(t_ns) ? t_ns : "0"}}`);
     S.sentByTrack.set(tu, r.id);
     toast(r.already_dispatched ? `Already dispatched: ${shortId(tu)} is on incident ${r.id}`
       : `Drone sent to ${shortId(tu)} · ${r.located ? `located (${r.loc_source || "?"}) ${ll(r.lat, r.lon)}` : "not located"}`);
@@ -236,7 +245,9 @@ async function pollMsgs() {
 }
 const incs = () => [...S.inc.values()].sort((a, b) => ((b.status !== "closed") - (a.status !== "closed")) || ((b.opened_at || "") > (a.opened_at || "") ? 1 : -1));
 const msgsFor = id => S.msgs.filter(m => m.incident_id === id || m.body?.incident?.id === id);
-function lastFwd(x) { const f = (x.forwarded || []).at(-1); return f ? (f.status || f.error || "?") : null; }
+// forwarded = {attempts, delivered, last: {at, status|error, seq, ...}} (netra-ask's webhook delivery state)
+function lastFwd(x) { const f = x.forwarded?.last; return f ? (f.status || f.error || "?") : null; }
+const ev = (x, f) => x.evidence?.[f] || x.evidence?.[`${f.split(".")[0]}_url`];
 function selectInc(id) { S.sel = id; renderPane(); }
 function renderPane() {
   const pane = $("#pane"), keep = pane.scrollTop;
@@ -255,12 +266,12 @@ function renderList(pane) {
     Open a camera and press <b>Send drone</b> on a person's box. Incidents launched from here show up here.</div></div></div>`));
   for (const x of all) {
     const f = lastFwd(x), closed = x.status === "closed";
-    const b = h(`<button class="qitem ${closed ? "" : "open"}"><div class="qthumb">${closed ? "✓" : "✈"}</div><div class="qbody">
-      <div class="qt">${esc(cap1(x.why_label || x.why || "operator launch"))}</div>
-      <div class="qm">${esc(camOf(x.camera_id)?.name || x.camera_id || "")} · ${esc(ago(x.opened_at))}</div>
+    const b = h(`<button class="qitem ${closed ? "" : "open"}">${ev(x, "crop.jpg") ? `<img class="qthumb" src="${esc(ev(x, "crop.jpg"))}" alt="">` : `<div class="qthumb">${closed ? "✓" : "✈"}</div>`}<div class="qbody">
+      <div class="qt">${esc(cap1(x.why_label || String(x.why || "operator launch").replace(/_/g, " ")))}</div>
+      <div class="qm">${x.edge_track ? `${esc(shortId(x.edge_track))} · ` : ""}${esc(camOf(x.camera_id)?.name || x.camera_id || "")} · ${esc(ago(x.opened_at))}${closed && x.close_reason ? ` · ${esc(x.close_reason)}` : ""}</div>
       <div class="qchips"><span class="chip ${closed ? "" : "red"}">${closed ? "Closed" : "Open"}</span>
         ${x.located ? `<span class="chip">Located${x.radius_m != null ? ` ±${fx(x.radius_m, 0)} m` : ""}</span>` : `<span class="chip muted">Not located</span>`}
-        ${f != null ? `<span class="chip ${/^2/.test(String(f)) ? "green" : "amber"}">forwarded ${esc(f)}</span>` : `<span class="chip muted">not forwarded</span>`}
+        ${f != null ? `<span class="chip ${/^2/.test(String(f)) ? "green" : "amber"}">forwarded ${esc(x.forwarded.delivered ?? "?")}/${esc(x.forwarded.attempts ?? "?")} · ${esc(f)}</span>` : `<span class="chip muted">not forwarded</span>`}
         ${msgsFor(x.id).length ? `<span class="chip green">drone got ${msgsFor(x.id).length}</span>` : ""}</div></div></button>`);
     b.onclick = () => selectInc(x.id);
     pane.append(b);
@@ -273,15 +284,19 @@ function renderDetail(pane, x) {
   pane.append(btn("← Drones sent", "ghost back", () => selectInc(null)));
   const closed = x.status === "closed";
   pane.append(h(`<div class="dhead"><div class="row"><span class="chip ${closed ? "" : "red"}">${closed ? "Closed" : "Open"}</span>
-    <span class="muted small">${esc(x.mode || "")} · ${esc(x.verdict || "")}</span></div><h2>${esc(cap1(x.why_label || x.why || "operator launch"))}</h2></div>`));
-  const fwd = (x.forwarded || []).map(f => esc(`${ago(f.at)}: ${f.type ? `${f.type} ` : ""}${f.status || f.error || "?"}`)).join("<br>");
+    <span class="muted small">${esc(x.mode || "")} · ${esc(x.verdict || "")}</span></div><h2>${esc(cap1(x.why_label || String(x.why || "operator launch").replace(/_/g, " ")))}</h2></div>`));
+  const F = x.forwarded, L = F?.last;
+  const fwd = L ? `${esc(F.delivered ?? "?")} of ${esc(F.attempts ?? "?")} delivered · last ${esc(L.status || L.error || "?")} ${esc(ago(L.at))}${L.netloc ? ` <span class="muted">to ${esc(L.netloc)}</span>` : ""}` : "";
+  const cmds = (x.commands || []).map(c => `${esc(c.command)} <span class="muted">${esc(c.delivery_status || "")} · ${esc(ago(c.issued_at))}${c.reason?.code ? ` · ${esc(c.reason.code)}` : ""}</span>`).join("<br>");
   const loc = x.located ? `${ll(x.lat, x.lon)}${x.radius_m != null ? ` <span class="muted">±${fx(x.radius_m, 1)} m</span>` : ""}${x.loc_source ? ` <span class="muted">· ${esc(x.loc_source)}</span>` : ""}` : `<span class="muted">Not located</span>`;
-  const mine = [...S.sentByTrack].find(([, id]) => id === x.id)?.[0];
+  const mine = x.edge_track || [...S.sentByTrack].find(([, id]) => id === x.id)?.[0];
+  if (ev(x, "frame.jpg")) pane.append(h(`<a class="media" href="${esc(ev(x, "frame.jpg"))}" target="_blank"><img src="${esc(ev(x, "frame.jpg"))}" alt="Frame at the click, person boxed"></a>`));
   pane.append(h(`<div class="facts">${fact("Incident", `<span class="mono small">${esc(x.id)}</span>`)}${fact("Camera", esc(camOf(x.camera_id)?.name || x.camera_id))}
     ${fact("Person", mine ? esc(shortId(mine)) : null)}${fact("Site track", x.site_track_id ? `<span class="mono small">${esc(x.site_track_id)}</span>` : null)}
     ${fact("State", esc(x.status || "?") + (x.close_reason || x.closed_reason ? ` <span class="muted">· ${esc(x.close_reason || x.closed_reason)}</span>` : ""))}
     ${fact("Opened", when(x.opened_at))}${fact("Updated", when(x.updated_at))}${fact("Closed", when(x.closed_at))}
-    ${fact("Location", loc)}${fact("Forwarded", fwd || `<span class="muted">nothing sent yet</span>`)}
+    ${fact("Location", loc)}${fact("Operator", x.operator ? esc(x.operator) : null)}${fact("Aborted by", x.aborted_by ? esc(x.aborted_by) : null)}
+    ${fact("Forwarded", fwd || `<span class="muted">nothing sent yet</span>`)}${fact("Commands", cmds || null)}
     ${fact("Delivered", msgsFor(x.id).length ? `${msgsFor(x.id).length} message${msgsFor(x.id).length === 1 ? "" : "s"} at the drone receiver` : `<span class="muted">nothing received yet</span>`)}</div>`));
   const row = h(`<div class="row"></div>`);
   if (!closed) {
@@ -301,11 +316,17 @@ function renderLink(pane, rows, title) {
   if (!rows.length) { pane.append(h(`<div class="muted small">No messages yet.</div>`)); return; }
   const box = h(`<div class="msgs"></div>`);
   for (const m of rows) {
-    const body = m.body ? JSON.stringify(m.body.incident || m.body.command || m.body, null, 1) : "";
+    const b = m.body || {}, I = b.incident, C = b.command;
+    // one line of what the drone would act on; the whole signed body folded underneath
+    const what = I ? `${I.status} · ${I.verdict}${I.located ? ` · ${ll(I.lat, I.lon)} ±${fx(I.radius_m, 0)} m` : " · not located"}`
+      : C ? `${typeof C === "string" ? C : C.command || JSON.stringify(C)}${b.reason?.code ? ` · ${b.reason.code}` : ""}`
+      : b.position ? `position ${ll(b.position.lat, b.position.lon)}` : "";
+    const body = JSON.stringify(b, null, 1);
     box.append(h(`<div class="msg"><div class="row"><span class="mt">${esc(m.type || "?")}</span>
       <span class="chip ${m.verified ? "green" : "red"}">${m.verified ? "signature ok" : "unverified"}</span>
       <span class="muted">${esc(ago(m.received_at))}${m.seq != null ? ` · seq ${esc(m.seq)}` : ""}</span></div>
-      ${m.incident_id ? `<div class="muted mono small">${esc(m.incident_id)}</div>` : ""}<pre>${esc(body.slice(0, 1200))}</pre></div>`));
+      ${what ? `<div>${esc(what)}</div>` : ""}${m.incident_id ? `<div class="muted mono small">${esc(m.incident_id)}</div>` : ""}
+      <details><summary class="muted small">signed body</summary><pre>${esc(body.slice(0, 4000))}</pre></details></div>`));
   }
   pane.append(box);
 }

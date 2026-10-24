@@ -17,7 +17,7 @@ import traceback
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 log = logging.getLogger("hackdash")
@@ -82,7 +82,11 @@ def to_slash():
 
 @app.get(f"{PREFIX}/")
 def index():
-    return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})
+    """The page, with its JS/CSS URLs versioned by mtime so a redeploy is never hidden by the browser cache."""
+    html = (STATIC / "index.html").read_text()
+    for f in ("hack.js", "hack.css"):
+        html = html.replace(f"/static/{f}", f"/static/{f}?v={int((STATIC / f).stat().st_mtime)}")
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 
 app.mount(f"{PREFIX}/static", StaticFiles(directory=STATIC), name="static")
