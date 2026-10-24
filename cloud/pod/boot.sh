@@ -48,6 +48,8 @@ $PY -c "import onnxruntime as o; o.preload_dlls(); print('ort', o.__version__, o
 [ -s models/siglip-vision.engine ] || $PY cloud/pod/build_trt.py models/siglip-vision.onnx models/siglip-vision.engine
 [ -s tls.key ] || openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=netra-cloud-edge" -keyout tls.key -out tls.crt
 set +x
+# the droplet's edge tunnel key (port-forward to edge-serve only), like netra-ask-edge-tunnel to the Jetson
+mkdir -p /root/.ssh; grep -qf cloud/pod/authorized_keys /root/.ssh/authorized_keys 2>/dev/null || cat cloud/pod/authorized_keys >> /root/.ssh/authorized_keys
 sed "s|@PUSH_PASS@|$PUSH_PASS|; s|@W@|$W|g" cloud/pod/mediamtx.yml > mediamtx.yml
 
 export PYTHONPATH=$W ASK_BACKEND=ort ASK_POSE=1 \

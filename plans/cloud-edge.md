@@ -31,6 +31,10 @@ move the relay to a small box that takes 443 (or get the office to open the pod'
 **LTE guard:** `cloud/push.sh` checks every 10 s that the route to the relay leaves through `wlP1p1s0`; if Wi-Fi drops and
 the default route moves to lte0 (25 MB/h cap) every push is killed until Wi-Fi is back.
 
+**Pod ports move on every container restart** (RunPod remaps them: 22159/22160 became 22155/22156). The relay rule
+allows any port on the pod IP; after a restart update `POD=` in each box's push env (and the droplet tunnel's `-p`).
+A stable endpoint for production = keep the pod running, or front it with a fixed host.
+
 ## Latency budget (vs today's p50 1.04 s)
 Extra hop: Jetson (Chicago) → droplet (NYC) → pod (Montreal), TCP, ≈ 30-60 ms one way + one more decode on the pod.
 Bucket POST pod → droplet ≈ 15 ms RTT. Expected cloud lag ≈ today + 0.1-0.3 s. Measured number: see the shadow section in
