@@ -1,4 +1,19 @@
-DONE: https://internal.netralabs.net/hack/ shows the real jetson-c920 ring frame with real edge person boxes, chips, Send drone, incidents + droplink messages; screenshot plans/dash-live.png.
+DONE: Cameras list now shows only cameras with a current picture (live + preview loads); none live -> one line "No camera is live right now." Deployed, screenshot plans/dash-live.png.
+
+## Camera-list change (William, via manager) — 14:50 PDT
+- hack.js renderWall only: filter to live cameras; a tile whose picture fails to load is removed (open camera first falls back
+  to its live frame); empty -> "No camera is live right now." Header reads "N live". node3-c920 and axis-q6215 are gone from the list.
+- Tiles now always use the edge preview (/ask/api/preview/<cam>.jpg): re-requesting the live frame on every 5 s wall refresh flashed black.
+- Committed + pushed (hack-dash 73c167a + screenshot commit), merged origin/main before deploy (install.sh enforces it), deployed.
+- For calib: renderWall rebuilds the tiles from scratch every 5 s (pollCams); add the Calibrate hook inside the per-camera loop.
+
+## Flag for the manager (seen in the real data, not mine to fix)
+- jetson-c920 is now pointed INTO the lab (people at desks), not out the DIB window. Its calibration (8.7 m fit, "On the map")
+  is for the outdoor view, so launch locations from this view are wrong. The camera name still says "DIB window".
+- Page lag right now is 17-23 s behind live (was 3-6 s at 14:40). That's the live source (boxes) or the edge post cadence.
+- The same person sometimes gets two boxes (two edge tracks), so two chips overlap.
+
+## Earlier (first DONE)
 
 Branch hack-dash @ 0eef97a (pushed; contains origin/main 555872e incl. launch's abort-ordering fix d85fee4).
 Deployed from that merged tree with deploy/install.sh at 21:41 UTC; deployed hackdash/launch.py md5 == origin/main's.
