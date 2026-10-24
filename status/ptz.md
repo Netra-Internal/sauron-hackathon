@@ -1,45 +1,57 @@
-BLOCKED: PTZ control is built and unit-tested (branch hack-launch @ 41bc4b0) but the Axis is not reachable from any box I can reach. I need to know which box it's plugged into, and its IP if it isn't 192.168.0.90.
+WORKING: PTZ + Day/Night are LIVE on /hack/ and tested on the real Axis — MANAGER: please merge hack-launch @ f9261ee into main (it already contains origin/main fec8f4d). Browser latency check + screenshot in progress.
 
-## Where I looked (read-only, 21:5x UTC)
-- laptop WSL: no 192.168.0.x link (the ASIX USB adapter isn't up); ping 192.168.0.90 fails.
-- jetson-cloud: no route to it; netra-edge@axis-q6215 inactive.
-- netra-node (tailnet): no route. netra-node4 / pi-drone: no SSH from here (host key). toaster: SSH times out.
-
-## ⚠️ Conflict to resolve before the camera comes back (William / manager decide)
-The old autonomous Axis tracker is STILL RUNNING on the laptop as WSL user units: netra-ptz-axis.service (node_main --rig axis),
-netra-cv-tunnel.service, and netra-ptz-watch.timer (it restarts the node when it looks idle). It retries the camera every few s.
-If the Axis is plugged into the laptop again, that tracker will patrol and zoom it by itself and fight manual control.
-Stop it with: `systemctl --user stop netra-ptz-watch.timer netra-ptz-axis` (or `deploy/axis/wsl/install.sh --remove` in
-~/netra/netra-ptz-wt-axis-v7). I have not touched it.
-
-## Built
-- ptzd/ptzd.py: stdlib service on the box next to the camera, 127.0.0.1:8530, bearer token. It speaks VAPIX ptz.cgi with
-  digest auth and offers only a fixed command set: position, continuous move (speeds clamped to ±100), stop, areazoom centre,
-  goto/save of the preset "hack-home" only, image.cgi snapshot at 3 allowed resolutions. No raw VAPIX passthrough.
-  DEADMAN: any continuous move not refreshed within 0.8 s is stopped, so a lost mouse-up or a dropped tunnel can't leave
-  the camera turning.
-- ptzd/install.sh BOX forward|reverse: installs ptzd (systemd, DynamicUser, /etc/ptzd.env root 600 with the creds from
-  ~/.config/netra/axis-q6215.env) plus the tunnel. In forward mode the droplet dials the box (like netra-ask-edge-tunnel);
-  in reverse mode the box dials the droplet with its own key, authorised for that one port forward only. Token in droplet
+## Deployed (22:48–23:0x UTC) — what is where
+- Jetson (jetson-cloud): ptzd.service (new unit, DynamicUser, 127.0.0.1:8530), /opt/netra/ptzd/ptzd.py, /etc/ptzd.env (root 600:
+  creds from ~/.config/netra/axis-q6215.env + token). Camera 192.168.0.90 on enP8p1s0. No other Jetson unit touched.
+- Droplet: ptzd-tunnel.service (new, ssh -L 127.0.0.1:8530 -> netra@100.102.178.107, same pattern as netra-ask-edge-tunnel);
   /etc/ptzd-token (root:netra 640).
-- hackdash/ptz.py (/hack/api/ptz...): list, state (pose, zoom × and HFOV from the measured Oct 12 zoom curve, calibration
-  check), move (-1..1), stop, center (click, optional zoom), home, home/save, snapshot.jpg. It reports latency per command.
-  Calibration check: netra-ask's site_cameras frame.ptz pose for the camera. Axis has NO calibration row today, so the chip
-  says "Not calibrated". If it gets one, the chip goes red "Moved off calibration: map positions wrong" when the pose
-  differs by more than 0.5° or 50 zoom steps.
-- UI hackdash/static/ptz.{js,css}: full-screen "Move camera" screen. Live camera JPEG; click = centre, shift-click =
-  centre + 2× zoom. Hold-to-move pad and zoom in/out (re-sent every 250 ms while held, stop on release / blur / tab
-  hidden), arrow keys and + / −, speed slider, Go Home / Save as Home, pose + zoom readout, latency readout (median).
-- Tests: tests/test_ptz.py (ptzd against a recording ptz.cgi stub: auth, clamping, deadman, refresh, allowlist; zoom
-  curve; calibration check). Suite: 27 passed.
+- sauron-hack: I copied ONLY hackdash/ptz.py, ptz_zoomcal.json, static/ptz.{js,css} and changed the one ROUTERS line in the
+  DEPLOYED app.py (the deployed tree had other agents' work, e.g. relay.py, so no full rsync). Backup /root/sauron-hack-bak-ptz-224841.
+  Dash's 22:54 deploy from main put back an OLD ptz.css (no Day/Night styles); I re-copied mine. Now the deployed
+  ptz.py / ptz.js / ptz.css / hack.js / app.py == hack-launch f9261ee (sha256 checked). Merge f9261ee so the next deploy keeps them.
 
-## For dash / manager: lines touched outside my files
-- hackdash/app.py line 39: added `"ptz": "hackdash.ptz"` to ROUTERS.
-- hackdash/static/hack.js: renderWall, after the Calibrate chip (+5 lines): a "Move camera" chip on PTZ cameras' tiles.
-  After the "Calibrate / site setup" topbar line (+11 lines): openPtz() loader, then a fetch of /api/ptz that adds a
-  "Move <cam>" top-bar button per PTZ camera, because the Axis isn't on the wall while it isn't live.
-- Not deployed: it goes live with the next sauron-hack deploy (until ptzd is installed, /ptz reports reachable:false).
+## Real-camera test (tools/ptz_test.py, laptop -> https://internal.netralabs.net/hack/api, service account hack_launch)
+    15:51:35 start {'pan': 0.0, 'tilt': -44.97, 'zoom': 1.0}
+    15:51:36 saved start pose as Home (hack-home)
+    15:51:40 pan right 1.5 s @0.5 -> {'pan': 136.74, 'tilt': -44.98, 'zoom': 1.0} dpan 136.74
+    15:51:44 tilt up 1.5 s @0.5 -> {'pan': 136.83, 'tilt': 61.27, 'zoom': 1.0} dtilt 106.25
+    15:51:48 zoom in 1.5 s -> {'pan': 136.83, 'tilt': 61.27, 'zoom': 1016.0} dzoom 1015 {'hfov_deg': 16.4, 'x': 3.73}
+    15:51:53 deadman: one /move then nothing. pan at +0.0/+0.4 s: 133.15 124.77 | +1.8/+2.6 s (stopped?): 124.8 124.8 -> STOPPED
+    15:51:57 click centre at x=0.75,y=0.5 -> {'pan': 132.83, 'tilt': 61.03, 'zoom': 1016.0} dpan 8.03
+    15:51:57 snapshot 35179 bytes
+    15:52:02 Go Home -> {'pan': 0.0, 'tilt': -44.97, 'zoom': 1.0} vs start {'pan': 0.0, 'tilt': -44.97, 'zoom': 1.0} ok
+    
+    latency (ms): laptop -> https /hack/api -> droplet -> tunnel -> Jetson ptzd -> camera, and the droplet->camera part
+      /state       n= 12  median    504  p90    616  | droplet->camera median    84
+      /home/save   n=  1  median    649  p90    649  | droplet->camera median   120
+      /move        n=  9  median    501  p90    731  | droplet->camera median    97
+      /stop        n=  3  median    496  p90    600  | droplet->camera median    93
+      /center      n=  1  median    502  p90    502  | droplet->camera median   131
+      /snapshot.jpg n=  1  median    862  p90    862
+      /home        n=  1  median    518  p90    518  | droplet->camera median   114
 
-## Next, once I know the box
-`bash ptzd/install.sh <box> forward|reverse ...`, then move the real Axis from https://internal.netralabs.net/hack/ and
-measure command latency (page→camera and droplet→camera), screenshot, DONE.
+Latency, per command:
+- page -> camera answered, from the laptop over https: median ~500 ms (p90 ~600-730). The script opens a new TLS
+  connection per call; a browser keeps it open (being measured).
+- droplet -> tunnel -> Jetson ptzd -> camera: median ~95 ms (move 97, stop 93, state 84).
+- Jetson ptzd -> camera VAPIX: 7-20 ms.
+- Deadman verified on the real camera: one /move and no refresh -> camera stopped by itself (pan frozen at 124.8).
+
+## Fixes found on the real camera
+- Presets: setserverpresetname on ptz.cgi answers OK but creates nothing; it must go to ptzconfig.cgi (fixed). "hack-home" =
+  pan 0.00 / tilt -44.97 / zoom 1 (the pose the camera was in when I started). Go Home verified back to it.
+- Speed: 0.5 = ~90 deg/s pan (136 deg in 1.5 s) -> UI default speed 0.15, slider 0.02-1.
+- Deadman 0.8 -> 1.2 s: over the internet the refreshes sometimes came >0.8 s apart and the camera paused mid-hold.
+
+## Day / Night (William)
+- This PTZ firmware has no ImageSource.DayNight param (Properties.ImageSource.DayNight=no); the IR-cut is ptz.cgi
+  ircutfilter=on|off|auto. The IR LEDs (lightcontrol led0) have synchronizeDayNightMode=true, so they follow it.
+- The camera does NOT report the live filter state (PTZ.Various.V1.IrCutFilter stays "off" whatever is set), so the UI shows
+  the mode last set through ptzd plus "Picture now: colour / mono (IR)" measured from a snapshot (HSV saturation).
+- Verified: Night -> picture mono (IR), saturation 0.0; Day -> colour, saturation 50.3. The camera is LEFT IN DAY.
+- UI: Day / Night (IR) / Auto buttons under the zoom buttons in the Move camera screen.
+
+## Note
+- William is already using it (stops/snapshots from 69.196.39.231 in the sauron-hack log; camera pose changed).
+- The old autonomous tracker netra-ptz-axis on the laptop WSL is still running, but it can't reach the camera (the camera
+  is on the Jetson now), so no conflict while it stays there.

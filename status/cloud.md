@@ -1,4 +1,21 @@
-WORKING: Linovision (ZCM2126N) path prepared on the Jetson and waiting for it to be plugged in; C920 kept as fallback. Will verify the frame on /hack/ the moment it streams.
+WORKING: axis-q6215 is LIVE on /hack/ from the pod (frame verified 15:56 PDT, field + viaduct view) but slow: pod edge analyses only ~1.5 fps (infer 500-740 ms) → lag 7-11 s; debugging. jetson-c920: no camera (C920 unplugged; Linovision not yet seen).
+
+## Axis via the pod (manager GO 15:46 PDT)
+- Jetson: Axis reachable at 192.168.0.90 via enP8p1s0 (192.168.0.10, added by the manager). Stream checked with ffprobe:
+  H.264 1280x720 @ 5 fps (matches sites.yaml axis-q6215). Added `axis-q6215=rtsp://root:***@192.168.0.90/axis-media/media.amp?videocodec=h264&resolution=1280x720&fps=5`
+  to STREAMS in ~/cloud/push.env (creds from the laptop's axis-q6215.env, URL-encoded); restarted netra-cloud-push 22:48:04 UTC.
+  Guard: `ip route add unreachable 192.168.0.0/24 metric 2000` (runtime) like 192.168.1.0/24.
+- Jetson's own netra-edge@axis-q6215 stays inactive (checked) → only the pod posts axis-q6215.
+- Pod: mediamtx path axis-q6215 ready 22:48:10; supervisor started edge axis-q6215 22:48:16 (no config change needed:
+  the camera was already in sites.yaml) → production feed_health worker f16ede3d5cc2:<pid>, fps_in 5.1.
+- /hack/ (signed in) 15:56:13-21 PDT: frame.jpg 200 (201 KB), real view of the field/viaduct; boxes 0 (field empty);
+  lag_s 7.8 / 7.2 / 11.0.
+- Open problem: pod edge for the Axis analyses 1.3-3 fps (infer 270-740 ms) vs 35-60 ms for the C920 earlier on the
+  same pod. Detector alone on Axis frames: 40 ms (PNG) / 134-274 ms (live stream, while competing). Tried: thread caps
+  (OMP/OpenCV env, and an onnxruntime sitecustomize: 2 threads, no spinning) — no change in the live process.
+  cgroup shows CPU throttling (quota 7.65 CPU, container sees 96). Still investigating; boxes will appear when people do,
+  just 7-11 s late.
+
 
 ## Linovision prep (15:30-15:34 PDT)
 - Jetson wired port enP8p1s0: new NM profile `netra-linovision` = static 192.168.1.20/24, never-default, no DNS,

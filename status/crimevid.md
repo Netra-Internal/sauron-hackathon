@@ -1,5 +1,5 @@
-WORKING — first annotated video done: ~/sauron-data/crimevid/out/bike-lock/annotated.mp4 (bike lock cut, Jev deploy at 5.5 s = +3.5 s after crime start); 6 more clips running.
+WORKING — bike-lock re-rendered with a POLICE label: ~/sauron-data/crimevid/out/bike-lock/annotated.mp4 (police = blue, never suspect; weapon fact attributed to officers in the HUD); other clips in progress.
 
-- Pipeline: netra-ask main dispatch Watcher (replay, DirSink, nothing posted), PersonGate YOLO11s ONNX, Jev strips every 2 s, default PolicyConfig (judge.py md5 identical to jetson-cloud deploy; no DISPATCH_POLICY override there).
-- Render: crimevid/render.py (YOLO11s + ByteTrack every frame at 12 fps, HUD, deploy banner, timeline). Branch hack-crimevid.
-- Next: catalytic, atm-rip, car-breakin, fence-climb, 2 benign MEVA owner-at-car clips → artifact page.
+- Police label: crimevid/police.py asks Jev a yes/no on each tracked person's crop ("uniformed police/security officer?" + "visibly holding a weapon?"), cached per track, re-asked when the crop grows ≥1.6×; police = p ≥ 0.5. Bike-lock: suspect #1 p=0.04, officers #15/#34/#51 p=0.92-0.96. Cost 22.6k tokens ≈ $0.001.
+- Bike-lock honesty note: the DEPLOY (5.5 s, why=tampering) came before any police were in view (first officer 11.25 s). The later URGENT escalation (17.5 s, why=violence; weapon up to 0.98) is the police takedown, and the table will say so. Jev's subject box drifted onto officers for 23.7 s; the renderer re-snaps to the suspect.
+- Pipeline: netra-ask main dispatch Watcher (replay, nothing posted), default PolicyConfig (judge.py byte-identical to the jetson-cloud deploy).
