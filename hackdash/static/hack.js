@@ -130,7 +130,7 @@ function stopStream() {
   clearTimeout(st.retry); clearInterval(st.watch);
   st.hls?.destroy(); st.pc?.close();
   if (st.whepAt) fetch(st.whepAt, { method: "DELETE", credentials: "same-origin" }).catch(() => {});
-  v.removeAttribute("src"); v.srcObject = null; v.load(); v.classList.add("hidden"); $("#frame").classList.remove("hidden");
+  v.onerror = null; v.removeAttribute("src"); v.srcObject = null; v.load(); v.classList.add("hidden"); $("#frame").classList.remove("hidden");
   S.st = { state: "off" };
 }
 function firstFrame(v, ms) {
@@ -158,9 +158,8 @@ async function whep(cam, v, st) {
 }
 async function hls(cam, v, st) {
   const url = `${STREAM(cam)}/index.m3u8`;
-  if (!window.Hls && !v.canPlayType("application/vnd.apple.mpegurl")) {
-    await new Promise((ok, bad) => { const s = document.createElement("script"); s.src = HLS_JS; s.onload = ok; s.onerror = () => bad(new Error("hls.js didn't load")); document.head.append(s); });
-  }
+  // hls.js (lowLatencyMode) wherever MSE exists; the browser's own HLS only without it (iPhone Safari)
+  if (!window.Hls) await new Promise(ok => { const s = document.createElement("script"); s.src = HLS_JS; s.onload = s.onerror = ok; document.head.append(s); });
   let fatal;
   const died = new Promise((_, bad) => fatal = bad);
   if (window.Hls?.isSupported()) {
@@ -170,7 +169,10 @@ async function hls(cam, v, st) {
       if (st.state === "playing") streamFailed(st, `HLS ${d.details}`); else fatal(new Error(`${d.details}${d.response?.code ? ` ${d.response.code}` : ""}`));
     });
     x.loadSource(url); x.attachMedia(v);
-  } else v.src = url;                                 // Safari: native HLS
+  } else if (v.canPlayType("application/vnd.apple.mpegurl")) {
+    v.onerror = () => { if (S.st !== st) return; if (st.state === "playing") streamFailed(st, "HLS error"); else fatal(new Error("HLS error")); };
+    v.src = url;
+  } else throw new Error("no HLS player");
   await Promise.race([firstFrame(v, 8000), died]);
 }
 async function startStream(gen) {
