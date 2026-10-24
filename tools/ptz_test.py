@@ -2,6 +2,10 @@
 Saves the current pose as Home, holds pan / tilt / zoom, lets the deadman stop a move, centres on a click, goes Home, and
 prints the measured latency of every command. HACK_LAUNCH_USER=.. HACK_LAUNCH_PASSWORD=.. python3 ptz_test.py [cam]"""
 import base64
+import os as _os
+import sys as _sys
+if _os.environ.get("PTZ_TEST_WILLIAM_ASKED") != "1":     # HARD RULE (William, Oct 24): this MOVES the camera
+    _sys.exit("ptz_test.py moves the Axis. Never run it unless William asked directly (then PTZ_TEST_WILLIAM_ASKED=1, and an operator login: hack_launch gets 403).")
 import json
 import os
 import statistics

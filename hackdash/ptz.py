@@ -16,7 +16,9 @@ until the camera goes back or is recalibrated. With no calibration row, calibrat
   POST /ptz/{cam}/center {x, y, zoom?}     x, y in 0..1 of the picture; zoom factor (1 = keep, 2 = 2x in)
   POST /ptz/{cam}/home              go to the "hack-home" server preset
   POST /ptz/{cam}/home/save         save the current pose as "hack-home"
-  GET  /ptz/{cam}/snapshot.jpg      the camera's own JPEG (1280x720), for the view the operator clicks on
+  GET  /ptz/{cam}/snapshot.jpg      the camera's own JPEG (640x360, shared, <= 1 fetch / 0.8 s, own tunnel), for the view the operator clicks on
+  POST /ptz/{cam}/lock {locked}     PTZ lock (operators only): while on, every write is refused for everyone
+  Writes are OPERATOR-ONLY (PTZ_OPERATORS, default william; the agents' hack_launch always gets 403).
   GET  /ptz/{cam}/daynight          {mode (last set here), picture colour|mono (IR) measured}   POST {mode}: IR-cut filter
 """
 from __future__ import annotations
@@ -39,6 +41,9 @@ log = logging.getLogger("hackdash.ptz")
 router = APIRouter()
 
 CAMS = dict(kv.split("=", 1) for kv in os.environ.get("PTZ_CAMS", "axis-q6215=http://127.0.0.1:8530").split(",") if "=" in kv)
+# Snapshots go over a SECOND tunnel to the same ptzd (ptzd-tunnel-img on the droplet): the Jetson link is a relayed
+# ~0.5-1 Mbit/s path, and in one SSH stream small commands waited seconds behind picture bytes. Falls back to CAMS.
+SNAP_CAMS = dict(kv.split("=", 1) for kv in os.environ.get("PTZ_SNAP_CAMS", "axis-q6215=http://127.0.0.1:8531").split(",") if "=" in kv)
 def _token() -> str:
     """PTZD_TOKEN, else the file the ptzd installer writes on the droplet (ptzd/install.sh)."""
     if os.environ.get("PTZD_TOKEN"):
@@ -117,8 +122,8 @@ def _base(cam: str) -> str:
     return CAMS[cam]
 
 
-async def ptzd(cam: str, method: str, path: str, params: dict | None = None) -> httpx.Response:
-    base = _base(cam)
+async def ptzd(cam: str, method: str, path: str, params: dict | None = None, base: str | None = None) -> httpx.Response:
+    base = base or _base(cam)
     try:
         r = await client().request(method, base + path, params=params, headers={"Authorization": f"Bearer {TOKEN}"})
     except httpx.HTTPError as e:
@@ -136,7 +141,47 @@ def _user(req: Request) -> str:
     return getattr(req.state, "user", None) or "unknown"
 
 
+# ---------------------------------------------------------------- who may move the camera
+# William's rule (Oct 24): the Axis is positioned for calibration; no test, script or agent may move it. Every write
+# (move, stop, centre/areazoom, home, preset, day/night, lock) passes through write_guard(): only users in PTZ_OPERATORS
+# may write. The agents' service account and any account not listed get 403. Reads (state, position, snapshot) stay open.
+OPERATORS = {u.strip() for u in os.environ.get("PTZ_OPERATORS", "william").split(",") if u.strip()}
+NEVER = {u.strip() for u in os.environ.get("PTZ_NEVER", "hack_launch").split(",") if u.strip()}   # service accounts
+LOCK_FILE = Path(os.environ.get("PTZ_LOCK_FILE", "/var/lib/sauron-hack/ptz-lock.json"))
+
+
+def can_write(user: str | None) -> bool:
+    return bool(user) and user in OPERATORS and user not in NEVER
+
+
+def _read_lock() -> dict:
+    try:
+        return json.loads(LOCK_FILE.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+_locks: dict[str, dict] = _read_lock()       # cam -> {locked, by, at}; default unlocked
+
+
+def locked(cam: str) -> dict | None:
+    lk = _locks.get(cam)
+    return lk if lk and lk.get("locked") else None
+
+
+def write_guard(cam: str, user: str | None, lock_change: bool = False) -> None:
+    """Raises 403 unless this user may send this camera a command now. Runs before anything reaches ptzd."""
+    if not can_write(user):
+        log.warning("ptz %s: write refused for %r (operator-only)", cam, user)
+        raise HTTPException(403, "PTZ is operator-only")
+    lk = locked(cam)
+    if lk and not lock_change:
+        raise HTTPException(403, f"PTZ is locked (by {lk.get('by')} at {lk.get('at')})")
+
+
 async def _cmd(cam: str, req: Request, path: str, params: dict | None = None) -> dict:
+    _base(cam)
+    write_guard(cam, getattr(req.state, "user", None))
     t0 = time.monotonic()
     out = (await ptzd(cam, "POST", path, params)).json()
     out["ms"] = round((time.monotonic() - t0) * 1000, 1)          # page -> camera answered, as seen from the droplet
@@ -169,15 +214,36 @@ async def cams():
     return out
 
 
+class Lock(BaseModel):
+    locked: bool
+
+
+@router.post("/ptz/{cam}/lock")
+async def set_lock(cam: str, body: Lock, req: Request):
+    """PTZ lock: while on, every write is refused for everyone (operators included) until an operator turns it off."""
+    _base(cam)
+    user = getattr(req.state, "user", None)
+    write_guard(cam, user, lock_change=True)
+    _locks[cam] = {"locked": body.locked, "by": user, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    try:
+        LOCK_FILE.write_text(json.dumps(_locks))
+    except OSError as e:
+        log.warning("ptz lock not persisted (%s): %s", LOCK_FILE, e)
+    log.info("ptz %s lock -> %s by %s", cam, body.locked, user)
+    return {"camera_id": cam, **_locks[cam]}
+
+
 @router.get("/ptz/{cam}/state")
-async def state(cam: str):
+async def state(cam: str, req: Request):
     t0 = time.monotonic()
     pose = (await ptzd(cam, "GET", "/position")).json()
     ms = round((time.monotonic() - t0) * 1000, 1)
     cal = await asyncio.to_thread(calibrated_pose, cam)
     p = {k: pose[k] for k in ("pan", "tilt", "zoom")}
     return {"camera_id": cam, **p, "zoom_info": zoom_info(p["zoom"]), "calibration": calib_check(p, cal),
-            "ms": ms, "camera_rtt_ms": pose.get("rtt_ms"), "home": HOME}
+            "ms": ms, "camera_rtt_ms": pose.get("rtt_ms"), "home": HOME,
+            "locked": locked(cam), "can_write": can_write(getattr(req.state, "user", None)),
+            "user": getattr(req.state, "user", None)}
 
 
 @router.post("/ptz/{cam}/move")
@@ -224,8 +290,7 @@ def picture_kind(jpeg: bytes) -> dict:
 async def daynight(cam: str):
     """mode: last set through ptzd (null if not since it started); picture: measured on a snapshot now."""
     out = (await ptzd(cam, "GET", "/daynight")).json()
-    snap = await ptzd(cam, "GET", "/snapshot.jpg", {"resolution": "640x360"})
-    return {**out, **await asyncio.to_thread(picture_kind, snap.content)}
+    return {**out, **await asyncio.to_thread(picture_kind, await snapshot_bytes(cam))}
 
 
 @router.post("/ptz/{cam}/daynight")
@@ -233,7 +298,32 @@ async def daynight_set(cam: str, body: DayNight, req: Request):
     return await _cmd(cam, req, "/daynight", {"mode": body.mode})
 
 
+SNAP_RES = "640x360"         # the view the operator clicks on: small, so commands never queue behind picture bytes
+SNAP_COMPRESSION = 75        # ~28 KB at 640x360 (58 KB at the camera default)
+SNAP_MIN_S = 0.8             # at most one camera snapshot per this, shared by every open page (~35 KB/s)
+_snap: dict[str, tuple[float, bytes]] = {}
+_snap_lock: dict[str, asyncio.Lock] = {}
+
+
+async def snapshot_bytes(cam: str) -> bytes:
+    """The newest camera JPEG, fetched at most every SNAP_MIN_S whatever the number of viewers (the Jetson link is a
+    relayed tunnel; two pages pulling full-size frames as fast as they load pushed command latency to seconds)."""
+    async with _snap_lock.setdefault(cam, asyncio.Lock()):
+        t, data = _snap.get(cam, (0.0, b""))
+        if time.monotonic() - t < SNAP_MIN_S:
+            return data
+        params = {"resolution": SNAP_RES, "compression": SNAP_COMPRESSION}
+        _base(cam)
+        try:
+            data = (await ptzd(cam, "GET", "/snapshot.jpg", params, SNAP_CAMS.get(cam))).content
+        except HTTPException as e:
+            if e.status_code != 503 or not SNAP_CAMS.get(cam):
+                raise
+            data = (await ptzd(cam, "GET", "/snapshot.jpg", params)).content       # picture tunnel down: the command one
+        _snap[cam] = (time.monotonic(), data)
+        return data
+
+
 @router.get("/ptz/{cam}/snapshot.jpg")
 async def snapshot(cam: str):
-    r = await ptzd(cam, "GET", "/snapshot.jpg", {"resolution": f"{SNAP_W}x{SNAP_H}"})
-    return Response(r.content, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+    return Response(await snapshot_bytes(cam), media_type="image/jpeg", headers={"Cache-Control": "no-store"})

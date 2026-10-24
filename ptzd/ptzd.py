@@ -13,7 +13,7 @@ through an SSH tunnel.
   POST /stop
   POST /center?x=&y=&w=&h=[&zoom=]      areazoom: pixel (x, y) of a w x h image becomes the centre; zoom % (100 = same)
   POST /goto?name=  POST /save?name=    server presets, names from PTZD_PRESETS only (default "hack-home")
-  GET  /snapshot.jpg?resolution=        image.cgi at an allowed resolution
+  GET  /snapshot.jpg?resolution=&compression=   image.cgi at an allowed resolution, JPEG compression 0-100
   GET  /daynight  POST /daynight?mode=  IR-cut filter: day (filter in, colour) | night (filter out, IR) | auto. On this PTZ
                                         firmware it is ptz.cgi `ircutfilter=on|off|auto`; the IR LEDs follow it (lightcontrol
                                         synchronizeDayNightMode). GET = the mode last set here (the camera can't be asked)
@@ -153,7 +153,8 @@ class Handler(BaseHTTPRequestHandler):
                 res = q.get("resolution", "1280x720")
                 if res not in RESOLUTIONS:
                     return self._json(400, {"error": f"resolution one of {sorted(RESOLUTIONS)}"})
-                return self._send(200, cam.get("/axis-cgi/jpg/image.cgi", {"resolution": res}), "image/jpeg")
+                comp = max(0, min(100, int(q.get("compression", 30))))
+                return self._send(200, cam.get("/axis-cgi/jpg/image.cgi", {"resolution": res, "compression": comp}), "image/jpeg")
             elif method == "POST" and u.path == "/move":
                 mover.move(clamp_speed(q.get("pan")), clamp_speed(q.get("tilt")), clamp_speed(q.get("zoom")))
                 out = {"moving": mover.moving}
