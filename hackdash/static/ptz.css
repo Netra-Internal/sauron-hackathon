@@ -29,3 +29,4 @@
   #ptz { grid-template-columns: 1fr; grid-template-rows: 54px 45vh minmax(0, 1fr); grid-template-areas: "pbar" "pview" "pside"; }
   #ptz .p-hint { display: none; }
 }
+#ptz #p-lock.on { background: var(--bad); border-color: var(--bad); color: #fff; }

@@ -36,8 +36,11 @@ UNIT_COMMON='After=network-online.target\n\n[Service]\nRestart=always\nRestartSe
 SSHOPTS="-N -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=accept-new"
 if [ "$MODE" = forward ]; then
   [ -n "$FWD" ] || { echo "forward needs DROPLET_TARGET"; exit 2; }
-  ssh "$DROPLET" "printf '[Unit]\nDescription=ptzd tunnel: droplet 127.0.0.1:8530 -> $FWD ptzd\n$UNIT_COMMON\nEnvironment=HOME=/root\nExecStart=/usr/bin/ssh $SSHOPTS -L 127.0.0.1:8530:127.0.0.1:8530 $FWD\n\n[Install]\nWantedBy=multi-user.target\n' > /etc/systemd/system/ptzd-tunnel.service
-    systemctl daemon-reload; systemctl enable -q --now ptzd-tunnel; systemctl restart ptzd-tunnel"
+  # two tunnels, two TCP connections: commands on 8530, snapshots on 8531, so commands never wait behind picture bytes
+  for pair in ptzd-tunnel:8530 ptzd-tunnel-img:8531; do u=${pair%:*}; p=${pair#*:}
+    ssh "$DROPLET" "printf '[Unit]\nDescription=ptzd tunnel: droplet 127.0.0.1:$p -> $FWD ptzd\n$UNIT_COMMON\nEnvironment=HOME=/root\nExecStart=/usr/bin/ssh $SSHOPTS -L 127.0.0.1:$p:127.0.0.1:8530 $FWD\n\n[Install]\nWantedBy=multi-user.target\n' > /etc/systemd/system/$u.service
+      systemctl daemon-reload; systemctl enable -q --now $u; systemctl restart $u"
+  done
 elif [ "$MODE" = reverse ]; then
   PUB=$(ssh "$BOX" 'sudo test -f /root/.ssh/ptzd_tunnel || sudo ssh-keygen -q -t ed25519 -N "" -C ptzd-tunnel -f /root/.ssh/ptzd_tunnel; sudo cat /root/.ssh/ptzd_tunnel.pub')
   ssh "$DROPLET" "grep -qF '$PUB' /root/.ssh/authorized_keys || echo 'restrict,port-forwarding,permitlisten=\"127.0.0.1:8530\",command=\"/bin/false\" $PUB' >> /root/.ssh/authorized_keys"
