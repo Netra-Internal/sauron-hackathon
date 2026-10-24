@@ -1,1 +1,1 @@
-restrict,port-forwarding,permitopen="127.0.0.1:8450" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDGVskV+fNRU7iD83hg8Kz8rcjpu4WY1521ju41ZA79x droplet-cloudedge
+restrict,port-forwarding,permitopen="127.0.0.1:8450",permitopen="127.0.0.1:8888" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDGVskV+fNRU7iD83hg8Kz8rcjpu4WY1521ju41ZA79x droplet-cloudedge
