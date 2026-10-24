@@ -76,8 +76,17 @@ function renderWall() {
     img.onerror = () => { img.classList.add("hidden"); t.querySelector(".tnone").classList.remove("hidden"); };
     if (src) img.src = src; else { img.classList.add("hidden"); t.querySelector(".tnone").classList.remove("hidden"); t.querySelector(".tnone").textContent = "Not live: no current picture"; }
     t.onclick = () => openCamera(c.camera_id);
+    const cal = h(`<span class="chip calib" role="button" title="Calibrate this camera on the map">Calibrate</span>`);   // calib.js
+    cal.onclick = e => { e.stopPropagation(); openCalib(c.camera_id); };
+    t.querySelector(".tchips").append(cal);
     wall.append(t);
   }
+}
+
+// Calibrate / Site setup (hackdash/static/calib.js, a full-screen screen over this page), loaded on first use
+function openCalib(cam) {
+  if (window.Calib) return window.Calib.open(cam);
+  const s = document.createElement("script"); s.src = `/hack/static/calib.js?v=${Date.now()}`; s.onload = () => window.Calib.open(cam); document.head.append(s);
 }
 
 // ------------------------------------------------------------------ the open camera, live (centre)

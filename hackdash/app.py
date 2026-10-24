@@ -36,7 +36,7 @@ except Exception:  # local dev without the internal checkout
 
 app = FastAPI(title="Sauron hack: send drone", docs_url=None, redoc_url=None, openapi_url=None)
 
-ROUTERS = {"live": "hackdash.live", "launch": "hackdash.launch"}
+ROUTERS = {"live": "hackdash.live", "launch": "hackdash.launch", "calib": "hackdash.calib"}
 MOUNTED: dict[str, str] = {}   # name -> "ok" or the import error
 
 
