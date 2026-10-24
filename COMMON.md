@@ -8,6 +8,7 @@ Read your own brief in briefs/<you>.md. This file holds the rules shared by all 
 - Never claim done without running the thing and showing the output. No simulated / mock / synthetic data in any product or UI: if there is no real data, show nothing.
 
 ## Code
+- ALL hackathon work goes in the hackathon repo: Netra-Internal/sauron-hackathon, checked out at ~/hack-2026-10-24 (also ~/netra/sauron-hackathon). Plans, tools, scripts, new code. Push your branch `hack-<you>` there.
 - Work only in YOUR OWN git worktree on YOUR OWN branch (`git worktree add ~/netra/<repo>-wt-hack-<you> -b hack-<you> origin/main`). Other agents are editing the same repos.
 - Commit with explicit paths (never `git add -A`). Push your branch. Do not merge to main or deploy unless your brief says so; the manager integrates.
 - Deploy hazard: netra-ask deploys rsync --delete from a checkout → a deploy from your branch wipes other agents' code. Manager deploys only.
