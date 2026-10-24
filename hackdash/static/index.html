@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Send drone · Netra</title>
+<link rel="stylesheet" href="/hack/static/hack.css">
+</head>
+<body>
+<!-- The Sites monitor layout: top bar + incidents (left) + the opened camera, live (centre) + camera wall (right). -->
+<header id="topbar">
+  <span class="brand">Netra</span>
+  <span class="title">Send drone</span>
+  <div id="pills" class="pills"></div>
+  <div class="grow"></div>
+  <span id="clock" class="mono muted small"></span>
+  <a class="btn ghost" href="/ask/sites">Sites ↗</a>
+</header>
+
+<aside id="panel"><div id="pane"></div></aside>
+
+<main id="stage">
+  <div class="framebar">
+    <span id="camcap" class="small"></span>
+    <div class="grow"></div>
+    <span id="lag" class="small"></span>
+  </div>
+  <div id="framebox">
+    <div id="frameinner" class="hidden">
+      <img id="frame" alt="Live camera frame">
+      <canvas id="boxes"></canvas>
+      <div id="chips"></div>
+    </div>
+    <div id="noframe" class="empty"></div>
+  </div>
+</main>
+
+<aside id="wall"></aside>
+
+<div id="toasts"></div>
+<script src="/hack/static/hack.js"></script>
+</body>
+</html>

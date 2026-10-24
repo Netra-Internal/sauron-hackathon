@@ -1,0 +1,21 @@
+[Unit]
+Description=Sauron hack: Send drone page + API (internal.netralabs.net/hack/)
+After=network-online.target postgresql.service
+
+[Service]
+User=netra
+Group=netra
+WorkingDirectory=/opt/netra/sauron-hack
+# netra-ask's env gives the worker token, edge tunnel URL, DB URL and the internal-login paths; ours overrides it
+EnvironmentFile=-/etc/netra-ask.env
+EnvironmentFile=/etc/sauron-hack.env
+Environment=HOME=/home/netra
+# read-only checks on the Jetson (judge on/off) as netra, with our own known_hosts
+Environment="HACK_JETSON_SSH=ssh -o BatchMode=yes -o ConnectTimeout=5 -o UserKnownHostsFile=/var/lib/sauron-hack/known_hosts netra@100.102.178.107"
+StateDirectory=sauron-hack
+ExecStart=/opt/netra/sauron-hack/.venv/bin/uvicorn hackdash.app:app --host 127.0.0.1 --port 8500 --workers 1 --proxy-headers
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
