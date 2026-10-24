@@ -1,0 +1,72 @@
+/* Calibrate screen (calib.js), over the send-drone page. Marker / frame / pair styles copied from netra-ask's
+   ask/static/sites.css; the tokens (--bg, --panel, ...) come from hack.css. */
+#calib { --pair: #ffd23f; --cam: #1f5eff;
+  position: fixed; inset: 0; z-index: 10; background: var(--bg); display: grid;
+  grid-template-columns: 372px minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: 54px calc(100vh - 54px);
+  grid-template-areas: "cbar cbar cbar" "cpane cframe cmap"; }
+#calib.sitetab { grid-template-columns: 372px 0 minmax(0, 1fr); }
+#calib.sitetab #cframe { display: none; }
+@media (prefers-color-scheme: dark) { #calib { --cam: #5b8cff; } }
+@media (max-width: 1100px) {
+  #calib { grid-template-columns: 340px minmax(0, 1fr); grid-template-rows: 54px 45vh calc(55vh - 54px);
+    grid-template-areas: "cbar cbar" "cpane cframe" "cpane cmap"; }
+  #calib.sitetab { grid-template-rows: 54px 0 calc(100vh - 54px); }
+}
+.cbar { grid-area: cbar; display: flex; align-items: center; gap: 10px; padding: 0 14px; background: var(--panel); border-bottom: 1px solid var(--line); min-width: 0; }
+.cbar select { background: transparent; border: 1px solid var(--line); border-radius: 8px; padding: 4px 6px; max-width: 280px; font-weight: 600; }
+.ctabs { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+.ctabs button { background: transparent; border: 0; padding: 5px 12px; }
+.ctabs button.on { background: var(--ink); color: var(--bg); }
+#cpane { grid-area: cpane; height: 100%; }
+#cframe { grid-area: cframe; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: #0b0c0e; border-right: 1px solid var(--line); }
+#cf-box { position: relative; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+#cf-img { max-width: 100%; max-height: 100%; display: block; user-select: none; -webkit-user-drag: none; cursor: crosshair; }
+#cf-over { position: absolute; pointer-events: none; }
+#cf-over .pt { pointer-events: all; cursor: grab; }
+#cmapwrap { grid-area: cmap; position: relative; min-width: 0; min-height: 0; }
+#cmap { position: absolute; inset: 0; }
+#calib .framebar { display: flex; align-items: center; gap: 10px; padding: 6px 10px; color: #c8ccd3; background: #15171a; min-height: 34px; }
+#calib .framebar .chip.amber { background: #23272e; color: #e0a43a; }
+#calib .hint { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); background: rgba(17,19,22,.88); color: #fff; padding: 7px 14px; border-radius: 99px; font-size: 13px; z-index: 3; pointer-events: none; }
+#calib .empty { color: #9aa0aa; text-align: center; padding: 30px; max-width: 420px; }
+
+#calib .btn.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+#calib .card { display: block; width: 100%; text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; color: var(--ink); }
+#calib .card:hover { border-color: var(--muted); }
+#calib .card .t { font-weight: 600; } #calib .card .s { font-size: 12.5px; color: var(--muted); }
+#calib .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #999; margin-right: 6px; vertical-align: 1px; }
+#calib .dot.ok { background: var(--ok); } #calib .dot.warn { background: var(--warn); }
+#calib .field { display: grid; grid-template-columns: 62px 1fr; gap: 6px 8px; align-items: center; }
+#calib .field label { font-size: 12.5px; color: var(--muted); }
+#calib .field input, #calib .full { width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 5px 8px; }
+#calib .field input:disabled { opacity: .65; }
+#calib .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; }
+#calib .fit { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 8px 0; font-size: 13px; }
+#calib .fit b { font-size: 16px; }
+#calib .fit.good { border-color: color-mix(in srgb, var(--ok) 55%, var(--line)); }
+#calib .fit.poor { border-color: color-mix(in srgb, var(--warn) 65%, var(--line)); }
+#calib .pairs { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 6px; }
+#calib .pairs td, #calib .pairs th { padding: 4px; border-bottom: 1px solid var(--line); text-align: left; }
+#calib .pairs th { color: var(--muted); font-weight: normal; }
+#calib .pairs td.n { font-variant-numeric: tabular-nums; }
+#calib .pairs td.bad { color: var(--bad); font-weight: 600; }
+#calib .pairs tr { cursor: pointer; } #calib .pairs tr.sel { background: var(--chip); }
+#calib .num { display: inline-flex; width: 18px; height: 18px; border-radius: 50%; background: var(--pair); color: #111; font-size: 11px; font-weight: 700; align-items: center; justify-content: center; }
+#calib .x { background: none; border: 0; color: var(--muted); font-size: 16px; padding: 0 4px; }
+#calib .x:hover { color: var(--bad); }
+#calib .step { background: var(--panel); border: 1px dashed var(--accent); border-radius: 10px; padding: 8px 12px; font-size: 13px; margin: 8px 0; }
+#calib .step.warn { border: 1px solid var(--warn); }
+
+.cammark { width: 26px; height: 26px; border-radius: 50%; background: var(--cam, #1f5eff); border: 2px solid #fff; box-shadow: 0 1px 6px rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 13px; cursor: grab; }
+.cammark.sel { outline: 3px solid #ffd23f; }
+.cammark.other { opacity: .7; cursor: pointer; width: 22px; height: 22px; font-size: 11px; }
+.headmark { width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 3px solid var(--cam, #1f5eff); cursor: grab; box-shadow: 0 1px 4px rgba(0,0,0,.5); }
+.pairmark { width: 20px; height: 20px; border-radius: 50%; background: #ffd23f; color: #111; border: 2px solid #111; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; cursor: grab; }
+.pairmark.sel { outline: 3px solid #fff; }
+.pairmark.pending { background: #fff; }
+.vertmark { width: 13px; height: 13px; border-radius: 50%; background: #ffd23f; border: 2px solid #111; cursor: grab; }
+.testmark { width: 14px; height: 14px; border-radius: 50%; background: #ff3df5; border: 2px solid #fff; box-shadow: 0 0 0 1px #000; pointer-events: none; }
+
+/* the hook on each camera tile (hack.js) */
+.tile .chip.calib { cursor: pointer; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.tile .chip.calib:hover { background: var(--accent); color: var(--accent-ink); }
