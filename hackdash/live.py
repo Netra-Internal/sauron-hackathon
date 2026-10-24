@@ -256,6 +256,8 @@ class Frames:
 FRAMES = Frames()
 _current: dict[str, int] = {}                    # cam -> newest frame time that has both JPEG and boxes
 _task: dict[str, asyncio.Task] = {}
+_watched: dict[str, float] = {}                  # cam -> monotonic time of the last /live poll
+WATCH_S = 15                                     # prefetch on bucket arrival only while someone polled this recently
 
 
 async def _advance(cam: str):
@@ -292,6 +294,7 @@ async def cameras():
 @router.get("/cameras/{cam}/live")
 async def live(cam: str, request: Request):
     c = _cam(cam)
+    _watched[cam] = time.monotonic()
     task = kick(cam)
     if cam not in _current and task is not None:
         try:
@@ -337,5 +340,8 @@ async def edge_bucket(request: Request):
         raise HTTPException(401, "bad worker token")
     form = await request.form()
     result = json.loads(form["result"])
-    OBS.push(str(result["camera_id"]), result.get("positions") or [], result.get("complete_ns"))
+    cam = str(result["camera_id"])
+    OBS.push(cam, result.get("positions") or [], result.get("complete_ns"))
+    if time.monotonic() - _watched.get(cam, -1e9) < WATCH_S:
+        kick(cam)                                # fetch the new frame now, not at the next poll (less lag)
     return {"ok": True}
