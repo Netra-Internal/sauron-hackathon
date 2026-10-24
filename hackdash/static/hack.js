@@ -56,25 +56,26 @@ async function pollCams() {
 const camOf = id => S.cams?.find(c => c.camera_id === id);
 function renderWall() {
   const wall = $("#wall");
-  const cams = (S.cams || []).slice().sort((a, b) => b.live - a.live);   // live cameras first
+  // only cameras with a current picture: a camera that isn't live (or whose picture won't load) isn't listed
+  const cams = (S.cams || []).filter(c => c.live);
+  const none = () => h(`<div class="wempty">No camera is live right now.</div>`);
   wall.innerHTML = "";
-  wall.append(h(`<div class="whead"><h2>Cameras</h2><span class="muted small">${S.cams ? `${cams.filter(c => c.live).length} of ${cams.length} live` : ""}</span></div>`));
+  wall.append(h(`<div class="whead"><h2>Cameras</h2><span class="muted small">${S.cams ? `${cams.length} live` : ""}</span></div>`));
   if (S.camErr || !cams.length) {
-    wall.append(h(`<div class="wempty">${esc(S.camErr || (S.cams ? "No cameras." : "Loading…"))}</div>`));
+    wall.append(S.camErr || S.cams ? (S.camErr ? h(`<div class="wempty">${esc(S.camErr)}</div>`) : none()) : h(`<div class="wempty">Loading…</div>`));
     return;
   }
   for (const c of cams) {
     const open = S.cam === c.camera_id;
     // the open camera shows its newest live frame; the others the edge preview netra-ask already serves (~30 s old)
-    // a camera that isn't live shows no picture: its last preview can be days old
-    const src = !c.live ? null : open && S.live?.frame_url ? frameUrl(S.live.frame_url) : `/ask/api/preview/${encodeURIComponent(c.camera_id)}.jpg?m=${Math.floor(Date.now() / 30e3)}`;
-    const t = h(`<button class="tile ${open ? "sel" : ""}"><div class="tframe"><img alt=""><div class="tnone hidden">No picture yet</div>
-      <div class="tover"><i class="${c.live ? "live" : "down"}"></i><span>${esc(c.name || c.camera_id)}</span></div></div>
-      <div class="tinfo"><div class="tstate">${c.live ? `Live${c.fps != null ? ` · ${fx(c.fps, 1)} fps` : ""}` : "Not live"}${open ? " · open" : ""}</div>
+    const src = open && S.live?.frame_url ? frameUrl(S.live.frame_url) : `/ask/api/preview/${encodeURIComponent(c.camera_id)}.jpg?m=${Math.floor(Date.now() / 30e3)}`;
+    const t = h(`<button class="tile ${open ? "sel" : ""}"><div class="tframe"><img alt="">
+      <div class="tover"><i class="live"></i><span>${esc(c.name || c.camera_id)}</span></div></div>
+      <div class="tinfo"><div class="tstate">Live${c.fps != null ? ` · ${fx(c.fps, 1)} fps` : ""}${open ? " · open" : ""}</div>
       <div class="tchips">${c.test_rig ? `<span class="chip test">test rig</span>` : ""}${c.calibrated ? `<span class="chip">On the map</span>` : `<span class="chip amber">Not calibrated</span>`}</div></div></button>`);
     const img = t.querySelector("img");
-    img.onerror = () => { img.classList.add("hidden"); t.querySelector(".tnone").classList.remove("hidden"); };
-    if (src) img.src = src; else { img.classList.add("hidden"); t.querySelector(".tnone").classList.remove("hidden"); t.querySelector(".tnone").textContent = "Not live: no current picture"; }
+    img.onerror = () => { t.remove(); if (!wall.querySelector(".tile")) wall.append(none()); };
+    img.src = src;
     t.onclick = () => openCamera(c.camera_id);
     wall.append(t);
   }
