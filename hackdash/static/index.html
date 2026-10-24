@@ -7,19 +7,20 @@
 <link rel="stylesheet" href="/hack/static/hack.css">
 </head>
 <body>
-<!-- The Sites monitor layout: top bar + incidents (left) + the opened camera, live (centre) + camera wall (right). -->
+<!-- The Sites monitor layout: top bar + the opened camera, live (left, wide) + camera wall (right). -->
 <header id="topbar">
   <span class="brand">Netra</span>
   <span class="title">Send drone</span>
   <div id="pills" class="pills"></div>
   <div class="grow"></div>
   <span id="clock" class="mono muted small"></span>
+  <a class="muted small" href="/hack/api/incidents" target="_blank" title="raw incidents (JSON)">Debug</a>
   <a class="btn ghost" href="/ask/sites">Sites ↗</a>
 </header>
 
-<aside id="panel"><div id="pane"></div></aside>
 
 <main id="stage">
+  <div id="droneout"></div>
   <div class="framebar">
     <span id="camcap" class="small"></span>
     <div class="grow"></div>
