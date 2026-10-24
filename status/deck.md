@@ -11,7 +11,7 @@ Speaker notes on every slide. Look: near-black, one ember accent (#FF6A1A), Spac
 - /mnt/c/Users/wstobaugh/Documents/Sauron-Hackathon-Deck.pdf   (C:\Users\wstobaugh\Documents\Sauron-Hackathon-Deck.pdf) 12 pages
 - How: the Playwright browser is not signed in to claude.ai, so the page's own Export couldn't be used. I rendered the 11 slide files locally
   in headless Chromium at 1920x1080 and built the PDF and pptx from those renders. The pptx slides are PICTURES (text not editable); for an
-  editable pptx, William can use Export on the artifact page. I checked the renders (re-exported 17:0x PDT after the crimevid update): nothing overflows.
+  editable pptx, William can use Export on the artifact page. I checked the renders (re-exported 16:59 PDT after the crimevid update): nothing overflows.
 
 ## Numbers and where they come from
 - crime: status/crimevid.md (DONE) table, verbatim: atm-rip +3.5, fence-climb +3.5 (hero), bike-lock +5.5 (police from 11.5 s, after deploy),
