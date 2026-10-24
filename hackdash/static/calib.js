@@ -268,14 +268,15 @@ async function save() {
   C.saving = false; render();
 }
 
-async function addCamera(lat, lon, source) {
+async function addCamera(lat, lon, source, openIt) {
   try {
     const live = C.liveCams.find(l => l.id === source);
     const c = await send("POST", `/calib/sites/${encodeURIComponent(C.site.id)}/cameras`, {
       name: live ? live.name : `Camera ${C.site.cameras.length + 1}`, lat, lon, yaw: 0,
       source: live ? { kind: "live", camera_id: live.id } : { kind: "upload" } });
     await loadSite(C.site.id, c.id);
-    toast(`Added “${c.name}”. Aim it, freeze a frame, then add point pairs.`);
+    if (openIt) C.tab = "camera";
+    toast(`Added “${c.name}”. Drag the blue marker to where it's mounted, freeze a frame, then add point pairs.`);
   } catch (err) { toast(`Couldn't add the camera: ${err.message}`); }
   render();
 }
@@ -343,6 +344,7 @@ function paneCam(pane) {
   const feed = c.source?.camera_id;
   pane.append(h(`<h2>${esc(c.name)}</h2>`));
   pane.append(h(`<div class="muted small">${feed ? `Live feed <span class="mono">${esc(feed)}</span>` : "Uploaded still (no live feed)"} · record <span class="mono">${esc(c.id)}</span></div>`));
+  pane.append(btn("Remove this camera…", "danger small", () => { C.tab = "site"; C.removing = c.id; render(); }));
   if (c.calibrated) pane.append(h(`<div class="muted small">Saved: ${esc(fitLine(c.fit))}${c.fit?.fitted_at ? ` · ${esc(ago(c.fit.fitted_at))}` : ""}</div>`));
   const others = feed ? C.site.cameras.filter(x => x.id !== c.id && x.source?.camera_id === feed && x.calibrated) : [];
   if (others.length) pane.append(h(`<div class="step warn">${others.length + 1} calibrated records link ${esc(feed)}. netra-ask projects its people with the most recently saved one.</div>`));
@@ -507,13 +509,32 @@ function paneSite(pane) {
     try { C.site = await send("PATCH", `/calib/sites/${encodeURIComponent(s.id)}`, { lat: c.lat, lon: c.lng, zoom: map.getZoom() }); toast("Site centre saved"); } catch (err) { toast(`Couldn't save: ${err.message}`); }
     render();
   }));
-  pane.append(h(`<div class="label"><span>Cameras</span></div>`));
+  pane.append(h(`<div class="label"><span>Cameras on this site</span><span>${s.cameras.length}</span></div>`));
   for (const c of s.cameras) {
-    const b = h(`<button type="button" class="card"><div class="t">${esc(c.name)}</div><div class="s">${c.calibrated ? `<span class="dot ok"></span>${esc(fitLine(c.fit))}` : `<span class="dot warn"></span>not calibrated`} · ${c.source?.camera_id ? esc(c.source.camera_id) : "still"}</div></button>`);
-    b.onclick = () => { C.tab = "camera"; selectRecord(c.id); };
-    pane.append(b);
+    const card = h(`<div class="card"><div class="t">${esc(c.name)}</div><div class="s">${c.calibrated ? `<span class="dot ok"></span>${esc(fitLine(c.fit))}` : `<span class="dot warn"></span>not calibrated`} · ${c.source?.camera_id ? esc(c.source.camera_id) : "still"} · <span class="mono">${esc(c.id)}</span></div><div class="row" style="margin-top:6px"></div></div>`);
+    const row = card.querySelector(".row");
+    if (C.removing === c.id) {
+      row.append(h(`<span class="small"><b>Remove “${esc(c.name)}”?</b> Its calibration is deleted${c.source?.camera_id ? ` and ${esc(c.source.camera_id)}'s people leave the map` : ""}.</span>`));
+      row.append(btn("Yes, remove", "dangerfill", async () => {
+        try { await send("DELETE", `/calib/sites/${encodeURIComponent(s.id)}/cameras/${encodeURIComponent(c.id)}`); toast(`Removed “${c.name}”`); C.removing = null; if (C.cid === c.id) C.d = null; await loadSite(s.id); }
+        catch (err) { toast(`Couldn't remove: ${err.message}`); }
+        C.tab = "site"; render();
+      }));
+      row.append(btn("Cancel", "", () => { C.removing = null; render(); }));
+    } else {
+      row.append(btn("Calibrate", "primary", () => { C.tab = "camera"; selectRecord(c.id); }));
+      row.append(btn("Remove camera", "danger", () => { C.removing = c.id; render(); }));
+    }
+    pane.append(card);
   }
   if (!s.cameras.length) pane.append(h(`<p class="muted small">No cameras yet.</p>`));
+  // every pipeline camera netra-ask knows that no record on this site links yet: one click adds it
+  const onSite = new Set(s.cameras.map(c => c.source?.camera_id).filter(Boolean));
+  const free = C.liveCams.filter(l => !onSite.has(l.id));
+  pane.append(h(`<div class="label"><span>Add a camera</span><span>${free.length}</span></div>`));
+  if (!free.length) pane.append(h(`<p class="muted small">Every camera feed is already on this site.</p>`));
+  for (const l of free) pane.append(btn(`+ Add ${l.name} (${l.id})`, "primary addcam", () => addCamera(map.getCenter().lat, map.getCenter().lng, l.id, true)));
+  pane.append(h(`<p class="muted small">It is placed at the centre of the map, then its calibration opens: drag the blue marker to where it is mounted.</p>`));
   if (!s.cameras.length) pane.append(btn("Delete this empty site", "danger", async () => {
     if (!confirm(`Delete the site “${s.name}”?`)) return;
     try { await send("DELETE", `/calib/sites/${encodeURIComponent(s.id)}`); C.sites = (await api("/calib/sites")).sites; C.site = null; C.cid = null; C.d = null; if (C.sites.length) await loadSite(C.sites[0].id); }
