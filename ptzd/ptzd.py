@@ -7,7 +7,7 @@ through an SSH tunnel.
   GET  /health                          no token: {ok, camera}
   GET  /position                        {pan, tilt, zoom, rtt_ms}
   POST /move?pan=&tilt=&zoom=           continuous speeds, ints -100..100 (0 = that axis stops). DEADMAN: unless another
-                                        /move arrives within PTZD_DEADMAN_S (0.8 s), the camera is stopped. So a
+                                        /move arrives within PTZD_DEADMAN_S (1.2 s), the camera is stopped. So a
                                         hold-to-move button that stops refreshing (lost mouseup, dropped tunnel)
                                         cannot leave the camera turning.
   POST /stop
@@ -34,7 +34,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 log = logging.getLogger("ptzd")
-DEADMAN_S = float(os.environ.get("PTZD_DEADMAN_S", "0.8"))
+DEADMAN_S = float(os.environ.get("PTZD_DEADMAN_S", "1.2"))
 PRESETS = set(filter(None, os.environ.get("PTZD_PRESETS", "hack-home").split(",")))
 RESOLUTIONS = {"640x360", "1280x720", "1920x1080"}
 
@@ -58,8 +58,8 @@ class Vapix:
         except (OSError, http.client.HTTPException) as e:
             raise VapixError(f"{type(e).__name__}: {e}") from e
 
-    def ptz(self, **params) -> str:
-        body = self.get("/axis-cgi/com/ptz.cgi", params).decode("iso-8859-1", "replace")
+    def ptz(self, cgi: str = "ptz.cgi", **params) -> str:
+        body = self.get(f"/axis-cgi/com/{cgi}", params).decode("iso-8859-1", "replace")
         if body.lstrip().lower().startswith("error"):           # ptz.cgi answers 200 with an "Error:" body
             raise VapixError(body.strip())
         return body
@@ -167,13 +167,17 @@ class Handler(BaseHTTPRequestHandler):
                 name = q.get("name", "")
                 if name not in PRESETS:
                     return self._json(400, {"error": f"preset one of {sorted(PRESETS)}"})
-                cam.ptz(**({"gotoserverpresetname": name} if u.path == "/goto" else {"setserverpresetname": name}))
+                if u.path == "/goto":
+                    cam.ptz(gotoserverpresetname=name)
+                else:                                   # presets are created by ptzconfig.cgi; ptz.cgi ignores this
+                    cam.ptz("ptzconfig.cgi", setserverpresetname=name)
                 out = {"ok": True, "preset": name}
             else:
                 return self._json(404, {"error": "not found"})
         except (KeyError, ValueError):
             return self._json(400, {"error": "bad parameters"})
         except VapixError as e:
+            log.warning("%s %s -> camera error: %s", u.path, q, e)
             return self._json(502, {"error": f"camera: {e}"})
         out["rtt_ms"] = round((time.monotonic() - t0) * 1000, 1)
         if u.path != "/position":

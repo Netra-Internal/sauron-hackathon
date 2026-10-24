@@ -52,7 +52,7 @@ def call(base, method, path, token="tok"):
 
 
 def ptzcalls():
-    return [q for p, q in CamRecorder.calls if p == "/axis-cgi/com/ptz.cgi" and "query" not in q]
+    return [q for p, q in CamRecorder.calls if p.startswith("/axis-cgi/com/ptz") and "query" not in q]
 
 
 def test_auth_and_position(srv):
@@ -80,7 +80,7 @@ def test_refresh_keeps_moving(srv):
 def test_allowlist(srv):
     assert call(srv, "POST", "/goto?name=other")[0] == 400
     assert call(srv, "POST", "/save?name=hack-home")[0] == 200
-    assert ptzcalls()[-1] == {"setserverpresetname": "hack-home"}
+    assert CamRecorder.calls[-1] == ("/axis-cgi/com/ptzconfig.cgi", {"setserverpresetname": "hack-home"})
     assert call(srv, "POST", "/center?x=640&y=360&w=1280&h=720")[0] == 200
     assert ptzcalls()[-1] == {"areazoom": "640,360,100", "imagewidth": "1280", "imageheight": "720"}
     assert call(srv, "POST", "/center?x=2000&y=1&w=1280&h=720")[0] == 400
