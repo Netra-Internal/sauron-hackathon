@@ -1,5 +1,12 @@
 DONE: relay LIVE at https://internal.netralabs.net/hack/relay (deployed 22:21 UTC, hack-boxes 815cbbf, merged with origin/main). Agent cloud can point the RunPod edge's ask base URL there now.
 
+## PTZ check (re the manager's STOP, 22:2x UTC)
+- I sent ZERO commands to the Axis PTZ (or any camera), in the last 15 min and all session: no pan, tilt, zoom, home, preset, areazoom, day/night,
+  and no position queries either. My code (live.py, relay.py, tests) has no ptz, vapix or axis-cgi calls (`git grep` is empty).
+  It only reads ring frames from edge-serve, Postgres, and `systemctl is-active` over ssh to the Jetson.
+- I have NO test running that could send one: the local fake servers are killed, hack-boxes-test on the droplet is inactive, and I never used Playwright
+  this session. The playwright-mcp/chromium processes on the laptop belong to the agents' MCP servers. I did not touch them.
+
 ## Relay (22:21 UTC)
 - POST /hack/relay/api/edge/bucket: checks the worker token (bad token -> 401), spools the raw request to /var/lib/sauron-hack/relay (netra, 700),
   feeds live.OBS and answers 200 at once. One background worker forwards to http://127.0.0.1:8400/ask/api/edge/bucket (not through nginx,

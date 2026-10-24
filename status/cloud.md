@@ -1,4 +1,49 @@
-WORKING: axis-q6215 is LIVE on /hack/ from the pod (frame verified 15:56 PDT, field + viaduct view) but slow: pod edge analyses only ~1.5 fps (infer 500-740 ms) → lag 7-11 s; debugging. jetson-c920: no camera (C920 unplugged; Linovision not yet seen).
+DONE (live video): LL-HLS for axis-q6215 is live at https://internal.netralabs.net/hack/stream/axis-q6215/index.m3u8 behind the /hack login; cold start 0.8-1.6 s, newest media 0-0.5 s behind the pod's receive clock. → DASH: switch the player to it (hls.js, lowLatencyMode).
+
+## PTZ audit (William's rule, 16:08 PDT) — cloud sent NO PTZ commands, ever
+- Zero pan/tilt/zoom/home/preset/areazoom/day-night/VAPIX/ISAPI commands from me, in the last 15 min or at any time.
+  I have no test, script or Playwright run that talks to any camera control API; nothing to kill.
+- Everything I sent to the Axis (192.168.0.90), all RTSP video reads (DESCRIBE/SETUP/PLAY), no control calls:
+  1. ~22:47 UTC one ffprobe (≤15 s) to check codec/size.
+  2. netra-cloud-push RTSP session: started 22:48:04, restarted 22:56:57 (dropping jetson-c920) and ~23:04 with
+     `videokeyframeinterval=5` added to the media.amp URL. That is a per-stream encoder parameter for that RTSP session only (1 s keyframes);
+     it does not move the camera or change its saved settings.
+- Running now against the camera: exactly ONE ffmpeg (the push, pid 1808610 on the Jetson), read-only video.
+- The view changed between 22:50 (blurry grey) and 22:56 (field) without any command from me.
+
+
+## For dash (relay please)
+- URL per camera: `https://internal.netralabs.net/hack/stream/<camera_id>/index.m3u8` (now: `axis-q6215`). Same login as
+  /hack/ (cookie or basic; nginx auth_request to /hack/api/health, cached 30 s). 401 without login. Same origin as the
+  page, so no CORS. Media playlist `video1_stream.m3u8`, fMP4, H.264 1280x720 @ 5 fps, 1.0 s segments, 0.2 s LL-HLS parts.
+- Player: hls.js with `{lowLatencyMode: true, liveSyncDurationCount: 1, maxLiveSyncPlaybackRate: 1.5}`; Safari plays it natively.
+- Boxes stay on the existing /hack/api/cameras/<cam>/live poll (edge positions); frame.jpg no longer needed for the view.
+- WHEP/WebRTC: not done. It needs a UDP or extra TCP port reachable from the viewer straight to the pod; RunPod gives
+  random TCP ports, which the office egress blocks (only 22/80/443/... allowed), so WebRTC would fail exactly where we demo.
+  LL-HLS through 443 meets the targets.
+
+## Measured (16:05:57-16:06:11 PDT, laptop → Cloudflare → droplet → tunnel → pod, 6 runs)
+- Cold start = master + media playlist + init + newest part: 1.57, 1.05, 0.81, 0.85, 0.90, 0.78 s (target < 2 s ✔).
+  Before the auth cache it was 2.2-7.8 s (each request did a hackdash auth subrequest).
+- Newest part end vs wall clock: 0.51, 0.16, -0.03, 0.24, 0.18, 0.16 s (stamped at pod receive; add camera→Jetson→droplet→pod
+  transport, ~0.2-0.5 s est.). A player holding ~3 parts adds ~0.6 s → expect ~1-2 s glass-to-glass (target < 3 s ✔).
+
+## What changed (16:00-16:06 PDT)
+- Axis RTSP URL in the Jetson push now asks for `videokeyframeinterval=5` (1 s GOP; was ~12.4 s → 12 s HLS segments and
+  a 12 s first picture). One RTSP session to the camera (checked: 1 ffmpeg). push.env backups: push.env.bak-gop, .bak-c920-axis.
+- STREAMS is now ONLY axis-q6215 (jetson-c920 dropped as asked: C920 + Linovision gone). netra-cloud-push restarted only.
+- Pod mediamtx: HLS on 127.0.0.1:8888 (lowLatency, always remux); pod authorized_keys lets the droplet key forward 8888.
+- Droplet: new transient unit `netra-cloud-hls-tunnel` (ssh -p 22126 -L 127.0.0.1:8460:127.0.0.1:8888 root@63.141.33.141);
+  nginx `location /hack/stream/` + auth cache (backups /root/internal.nginx.bak-*; snippet in repo cloud/nginx-hack-stream.conf).
+  `nginx -t` ok, reload ok; /hack/ still 200.
+- Note: the 500s seen 23:03-23:04 UTC were sauron-hack being restarted by someone (clean stop/start), not this change.
+
+## Still open
+- RESOLVED: pod edge for axis-q6215 was ~1.5-3 fps (infer 270-740 ms) with the camera's ~12.4 s keyframe interval; since
+  the 1 s keyframe change it runs 5.0-5.1 fps analysed, infer 40-43 ms (pod heartbeats 23:06:01-23:06:44 UTC).
+- /frame for the Axis can be 20-70 s stale (ring .mkv written in 256 KB chunks at the Axis's low bitrate); the HLS
+  stream replaces frame polling for the view.
+
 
 ## Axis via the pod (manager GO 15:46 PDT)
 - Jetson: Axis reachable at 192.168.0.90 via enP8p1s0 (192.168.0.10, added by the manager). Stream checked with ffprobe:

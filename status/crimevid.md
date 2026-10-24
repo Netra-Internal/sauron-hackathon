@@ -1,5 +1,4 @@
-WORKING — bike-lock re-rendered with a POLICE label: ~/sauron-data/crimevid/out/bike-lock/annotated.mp4 (police = blue, never suspect; weapon fact attributed to officers in the HUD); other clips in progress.
-
-- Police label: crimevid/police.py asks Jev a yes/no on each tracked person's crop ("uniformed police/security officer?" + "visibly holding a weapon?"), cached per track, re-asked when the crop grows ≥1.6×; police = p ≥ 0.5. Bike-lock: suspect #1 p=0.04, officers #15/#34/#51 p=0.92-0.96. Cost 22.6k tokens ≈ $0.001.
-- Bike-lock honesty note: the DEPLOY (5.5 s, why=tampering) came before any police were in view (first officer 11.25 s). The later URGENT escalation (17.5 s, why=violence; weapon up to 0.98) is the police takedown, and the table will say so. Jev's subject box drifted onto officers for 23.7 s; the renderer re-snaps to the suspect.
-- Pipeline: netra-ask main dispatch Watcher (replay, nothing posted), default PolicyConfig (judge.py byte-identical to the jetson-cloud deploy).
+WORKING — hero clip change: running clean-CCTV candidates fence-climb (fence climbing, no graphics) then atm-rip (forced ATM, no graphics) through the same pipeline + deployed policy; each render auto-opens on William's screen (Downloads/sauron-<clip>.mp4).
+- PTZ: crimevid sent NO commands to the Axis PTZ (none in the last 15 min, none at all). Only read-only ssh to jetson-cloud (md5sum judge.py, systemctl cat, env file read) at ~15:30. No PTZ-moving process running.
+- Sources are cleaned before the models run (crimevid/prep.sh): bike-lock cropped to drop the news lower third, car-breakin app icons + editor box removed, atm-rip trimmed to one camera. On-disk candidates checked: UCF is 320x240 with tiny people, so rejected.
+- Police label: crimevid/police.py asks Jev per tracked-person crop (police? / holding a weapon?); police drawn blue, never the suspect; the HUD attributes the weapon fact to officers.

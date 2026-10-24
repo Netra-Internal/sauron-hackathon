@@ -1,4 +1,53 @@
-WORKING: PTZ + Day/Night are LIVE on /hack/ and tested on the real Axis — MANAGER: please merge hack-launch @ f9261ee into main (it already contains origin/main fec8f4d). Browser latency check + screenshot in progress.
+DONE: PTZ writes are now OPERATOR-ONLY (deployed 23:1x UTC): hack_launch and every non-William account get 403 "PTZ is operator-only"; PTZ lock toggle in the UI (default OFF). Tested the 403 path only; ZERO commands reached the camera. MANAGER: merge hack-launch @ 3024292 (= main f01a741 + 1 commit).
+
+## Guard (hackdash/ptz.py, deployed; sha256 of ptz.py / ptz.js / ptz.css on the droplet == 3024292)
+- Every camera write goes through _cmd() -> write_guard() BEFORE anything reaches ptzd: move, stop, center (areazoom),
+  home, home/save (preset), daynight, and the lock itself. Allowed: users in PTZ_OPERATORS (default "william"). Denied
+  always: PTZ_NEVER (default "hack_launch"), even if listed as an operator. Everyone else (landon, pranay, tanay, any test
+  account) gets 403 too. Reads stay open: /ptz, /state, /snapshot.jpg, GET /daynight.
+- PTZ lock: POST /ptz/{cam}/lock {locked}, operators only. While ON, every write is 403 "PTZ is locked (by ..)" for everyone,
+  William included. Default OFF. Stored in /var/lib/sauron-hack/ptz-lock.json (survives restarts).
+- /state now returns can_write, locked and user. The Move camera screen disables every control, key and click-on-picture
+  when the user can't write or the lock is on, and says why. The "PTZ lock: OFF/ON" button is in the top bar of that screen.
+- Tests: tests/test_ptz_guard.py (7): non-operators x 4 users x 7 writes -> 403 and the ptzd stub is never called;
+  hack_launch denied even if listed; reads open for hack_launch; operator write ok; lock blocks every write, then unlock.
+  Suite 36 passed.
+- Live 403 check on the droplet as hack_launch (no camera command possible): GET /state -> can_write false, locked null;
+  POST lock / move / stop / center / home / home/save / daynight -> all 403 "PTZ is operator-only"; sauron-hack logged
+  7 "write refused"; ptzd's command log stayed at 236 lines before and after (nothing reached the camera).
+- tools/ptz_test.py and tools/ptz_shots.js now exit at once unless PTZ_TEST_WILLIAM_ASKED=1 (and with hack_launch they'd 403 anyway).
+
+## Also in this deploy (written before the stop, not run against the camera since)
+- Latency fix: the Jetson link is a Tailscale relay (DERP lax, no direct path) carrying only ~65-130 KB/s. Two pages
+  pulling 58 KB snapshots pushed command latency to 2-6 s. Now: snapshots are 640x360 at compression 75 (~28 KB), at most
+  1 camera fetch per 0.8 s shared by all viewers, and they go over their own tunnel (ptzd-tunnel-img, droplet :8531), so
+  commands don't queue behind picture bytes. The page never queues a /move behind one still in flight.
+  NOT re-measured on the camera (rule). Idle read latency after the change: droplet -> ptzd /position ~150 ms;
+  in-browser /state median 109 ms (measured before the load spike).
+
+
+## Camera commands I sent (Manager asked: last 15 min; I list everything this afternoon to be complete). Times UTC.
+Attribution comes from my own session record matched to ptzd's log. The sauron-hack log can't separate senders: every request
+arrives from the Cloudflare egress 69.196.39.231, mine and William's alike.
+- 22:49:28-22:49:49 tools/ptz_test.py #1: Save as Home (hack-home, via ptz.cgi = no-op), pan 1.5 s @0.5, tilt 1.5 s @0.5,
+  zoom-in 1.5 s, one deadman move pan -0.3, centre (areazoom x=960/1280), Go Home (failed, 502).
+- ~22:50 direct VAPIX from the Jetson: absolute move pan=0.01 tilt=-44.98 zoom=1 (back to the start pose),
+  ptzconfig.cgi setserverpresetname=hack-home, ptz.cgi gotoserverpresetname=hack-home.
+- 22:51:36-22:52:02 tools/ptz_test.py #2: Save as Home (hack-home = pan 0 / tilt -45 / zoom 1), the same pan/tilt/zoom/
+  deadman/centre sequence, Go Home (camera back at pan 0 / tilt -45 / zoom 1).
+- 22:54:08 POST daynight mode=day (API). ~22:57 direct VAPIX ptz.cgi ircutfilter=on (Day). ~23:00 POST daynight night,
+  then day. The camera is in DAY now.
+- 22:58:5x tools/ptz_shots.js (Playwright): ArrowRight held 0.6 s, then ArrowLeft 0.6 s, speed 0.15, then the stops.
+  Pan went -168.58 -> -156.38 -> -148.22 (tilt -8.78, zoom 615 unchanged).
+  ⚠️ -168.58 / -8.78 / 615 was probably William's calibration spot. My nudge moved it off.
+- 23:03:2x tools/ptz_shots.js again: the same 0.6 s right + 0.6 s left nudge. Pan read -157.21 then -174.62. William's page
+  was also open, so the readings are mixed.
+- Two other ptz_shots runs (22:58:3x, 23:02:2x) failed before sending any move. The 23:07 run was rejected and never ran.
+- Not mine: the 22:54-22:55 page moves at speed 50 (the old UI default), i.e. William driving the page.
+- Position NOW (read-only query, 23:07:45): pan 176.86, tilt -8.79, zoom 615. That is NOT -168.58: the pan is about 14.3 deg
+  off the pose before my 22:58 nudge (wrapping through 180). I will NOT move it back. William decides.
+- I also overwrote the hack-home preset twice (22:49, 22:51) and the camera's IR mode (now Day).
+
 
 ## Deployed (22:48–23:0x UTC) — what is where
 - Jetson (jetson-cloud): ptzd.service (new unit, DynamicUser, 127.0.0.1:8530), /opt/netra/ptzd/ptzd.py, /etc/ptzd.env (root 600:
