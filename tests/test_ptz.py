@@ -22,7 +22,8 @@ class CamRecorder(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
         CamRecorder.calls.append((u.path, q))
-        body = b"pan=10.5\ntilt=-3.25\nzoom=2000\n" if q.get("query") == "position" else b""
+        body = b"pan=10.5\ntilt=-3.25\nzoom=2000\n" if q.get("query") == "position" else \
+            b"root.PTZ.Various.V1.IrCutFilter=on\n" if q.get("group") == "PTZ.Various.V1.IrCutFilter" else b""
         self.send_response(200)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -100,3 +101,22 @@ def test_zoom_info_and_calib_check():
     assert ptz.calib_check(pose, {"site_camera": "c", "pan": 12, "tilt": 5, "zoom": 1})["moved"] is True
     assert ptz.calib_check({**pose, "pan": 179.9}, {"site_camera": "c", "pan": -179.9, "tilt": 5})["moved"] is False
     assert ptz.calib_check(pose, {"site_camera": "c"})["moved"] is None
+
+
+def test_daynight(srv):
+    assert call(srv, "POST", "/daynight?mode=sepia")[0] == 400
+    code, out = call(srv, "POST", "/daynight?mode=day")
+    assert code == 200 and out["mode"] == "day" and ptzcalls()[-1] == {"ircutfilter": "on"}
+    assert call(srv, "GET", "/daynight")[1]["mode"] == "day"
+    call(srv, "POST", "/daynight?mode=night")
+    assert ptzcalls()[-1] == {"ircutfilter": "off"}
+
+
+def test_picture_kind():
+    pytest.importorskip("fastapi")
+    import io
+    from PIL import Image
+    from hackdash import ptz
+    for rgb, want in (((120, 120, 120), "mono (IR)"), ((160, 110, 60), "colour")):
+        b = io.BytesIO(); Image.new("RGB", (64, 36), rgb).save(b, "JPEG")
+        assert ptz.picture_kind(b.getvalue())["picture"] == want

@@ -17,6 +17,7 @@ until the camera goes back or is recalibrated. With no calibration row, calibrat
   POST /ptz/{cam}/home              go to the "hack-home" server preset
   POST /ptz/{cam}/home/save         save the current pose as "hack-home"
   GET  /ptz/{cam}/snapshot.jpg      the camera's own JPEG (1280x720), for the view the operator clicks on
+  GET  /ptz/{cam}/daynight          {mode (last set here), picture colour|mono (IR) measured}   POST {mode}: IR-cut filter
 """
 from __future__ import annotations
 
@@ -204,6 +205,32 @@ async def home(cam: str, req: Request):
 @router.post("/ptz/{cam}/home/save")
 async def home_save(cam: str, req: Request):
     return await _cmd(cam, req, "/save", {"name": HOME})
+
+
+class DayNight(BaseModel):
+    mode: str = Field(pattern="^(day|night|auto)$")
+
+
+def picture_kind(jpeg: bytes) -> dict:
+    """Colour or IR, from the picture itself: an IR picture (filter out) is grey, mean HSV saturation ~0."""
+    import io
+    from PIL import Image, ImageStat
+    im = Image.open(io.BytesIO(jpeg)).convert("RGB").resize((160, 90))
+    sat = ImageStat.Stat(im.convert("HSV")).mean[1]
+    return {"picture": "colour" if sat > 8 else "mono (IR)", "saturation": round(sat, 1)}
+
+
+@router.get("/ptz/{cam}/daynight")
+async def daynight(cam: str):
+    """mode: last set through ptzd (null if not since it started); picture: measured on a snapshot now."""
+    out = (await ptzd(cam, "GET", "/daynight")).json()
+    snap = await ptzd(cam, "GET", "/snapshot.jpg", {"resolution": "640x360"})
+    return {**out, **await asyncio.to_thread(picture_kind, snap.content)}
+
+
+@router.post("/ptz/{cam}/daynight")
+async def daynight_set(cam: str, body: DayNight, req: Request):
+    return await _cmd(cam, req, "/daynight", {"mode": body.mode})
 
 
 @router.get("/ptz/{cam}/snapshot.jpg")

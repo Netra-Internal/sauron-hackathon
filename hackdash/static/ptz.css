@@ -18,7 +18,9 @@
 #ptz .p-pos { font-size: 14px; line-height: 1.6; }
 #ptz .p-pad { display: grid; grid-template-columns: repeat(3, 64px); grid-template-rows: repeat(3, 56px); gap: 6px; justify-content: center; }
 #ptz .p-pad .btn, #ptz .p-zoom .btn { font-size: 18px; touch-action: none; user-select: none; }
-#ptz .p-zoom, #ptz .p-home { display: flex; gap: 8px; }
+#ptz .p-zoom, #ptz .p-home, #ptz .p-dn { display: flex; gap: 8px; }
+#ptz .p-dn .btn { flex: 1; font-size: 13px; padding: 6px 4px; }
+#ptz .p-dn .btn.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 #ptz .p-zoom .btn, #ptz .p-home .btn { flex: 1; font-size: 14px; }
 #ptz .btn:active { background: var(--chip); }
 #ptz .bad { color: var(--bad); }
