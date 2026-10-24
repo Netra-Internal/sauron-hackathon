@@ -12,10 +12,10 @@ Lifecycle: no watcher ever posts to an operator incident, so a 1 Hz loop re-post
 while the person (edge track, or any edge track of the same site track) is still seen, and always a fresh updated_at.
 Once the person has had no point for DISPATCH_SUBJECT_LOST_S (30 s) netra-ask closes it subject_lost and sends `end`.
 
-Abort: netra-ask's abort route needs the internal login, so the operator's own Cookie / Authorization is passed through
-(no service account; the audit names the operator). For our incidents the incident is then closed through the worker
-endpoint (close_reason dismissed, aborted_by): that stops the loop and makes netra-ask send `end` as well, so no later
-update can re-trigger a launch.
+Abort: for our incidents the loop stops, then the incident is closed through the worker endpoint (close_reason
+dismissed, aborted_by), so netra-ask sends `end` and the closed state and no open update can follow (an open update
+after an abort could look like a fresh deploy to a drone). Then netra-ask's abort route, which needs the internal login:
+the operator's own Cookie / Authorization is passed through, so its audit names the operator.
 
 Drone messages: read from droplink (droplink/, 127.0.0.1:8510), our stand-in for the drone's receiver.
 """
@@ -218,6 +218,7 @@ def _open_for(cam: str, uuid_: str, st: str | None) -> dict | None:
 
 _launch_lock = asyncio.Lock()
 _stopped: set[str] = set()       # aborted here: the loop never posts to them again
+_post_lock = asyncio.Lock()      # held around each loop post, so an abort can wait out the one in flight
 
 
 @router.post("/launch")
@@ -309,7 +310,10 @@ async def _tick():
         try:
             rec = await asyncio.to_thread(follow, live, row, iso()) if live else \
                 {**{k: v for k, v in row["record"].items() if k not in DERIVED}, "updated_at": iso()}
-            out = await asyncio.to_thread(post_incident, rec)
+            async with _post_lock:
+                if row["id"] in _stopped:
+                    continue
+                out = await asyncio.to_thread(post_incident, rec)
             if out.get("close_reason"):
                 log.info("operator incident %s closed: %s", row["id"], out["close_reason"])
         except Exception as e:                       # noqa: BLE001 — next tick tries again
@@ -344,23 +348,29 @@ async def _startup():
 
 @router.post("/incidents/{iid}/abort")
 async def abort(iid: str, req: Request):
-    """netra-ask's abort (the drone gets `abort`), as the operator; then our own incident is closed (the drone gets `end`)."""
-    fwd = {k: req.headers[k] for k in ("cookie", "authorization") if k in req.headers}
-    code, out = await asyncio.to_thread(_http, "POST", f"{ASK_URL}/api/dispatch/incidents/{iid}/abort", b"", fwd)
-    if code != 200:
-        raise HTTPException(code, out.get("detail", out))
+    """Our own incident is closed first (close_reason dismissed, aborted_by: the drone gets `end` and the closed state, and
+    no open update can follow), then netra-ask's abort as the operator (the drone gets `abort`). Sauron's incidents only
+    get the abort."""
+    user = _user(req) or "unknown"
+    async with _post_lock:                           # waits out a loop post in flight; after this the loop never posts it
+        _stopped.add(iid)
     row = await asyncio.to_thread(_row, iid)
     closed = None
     if row and row["status"] == "open" and (row["record"].get("judge") or {}).get("source") == SOURCE:
-        _stopped.add(iid)
         now = iso()
         rec = {**{k: v for k, v in row["record"].items() if k not in DERIVED}, "status": "closed", "closed_at": now,
-               "updated_at": now, "close_reason": "dismissed", "aborted_by": _user(req) or "unknown"}
-        try:
-            closed = (await asyncio.to_thread(post_incident, rec)).get("close_reason")
-        except RuntimeError as e:
-            _stopped.discard(iid)                    # the loop keeps it alive; the abort itself went out
-            log.warning("close after abort %s: %s", iid, e)
+               "updated_at": now, "close_reason": "dismissed", "aborted_by": user}
+        for n in range(3):
+            try:
+                closed = (await asyncio.to_thread(post_incident, rec)).get("close_reason")
+                break
+            except RuntimeError as e:
+                log.warning("close before abort %s (%d): %s", iid, n + 1, e)
+                await asyncio.sleep(0.5)
+    fwd = {k: req.headers[k] for k in ("cookie", "authorization") if k in req.headers}
+    code, out = await asyncio.to_thread(_http, "POST", f"{ASK_URL}/api/dispatch/incidents/{iid}/abort", b"", fwd)
+    if code != 200:
+        raise HTTPException(code, {"abort": out.get("detail", out), "closed": closed})
     return {**out, "closed": closed}
 
 
