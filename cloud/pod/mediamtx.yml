@@ -1,0 +1,33 @@
+# Cloud edge ingest. Cameras push H.264 over RTSPS (:8322, the only port exposed besides SSH) as user "pusher";
+# the edge processes on the pod read plain RTSP on loopback (:8554, not exposed). Only TCP: RunPod maps TCP ports only.
+logLevel: info
+api: yes
+apiAddress: 127.0.0.1:9997
+metrics: no
+rtmp: no
+hls: no
+webrtc: no
+srt: no
+rtsp: yes
+protocols: [tcp]
+encryption: optional
+rtspAddress: :8554
+rtspsAddress: :8322
+serverKey: @W@/tls.key
+serverCert: @W@/tls.crt
+readTimeout: 15s
+writeTimeout: 15s
+authInternalUsers:
+  - user: any
+    pass:
+    ips: ['127.0.0.1/32', '::1/128']
+    permissions:
+      - action: read
+      - action: api
+  - user: pusher
+    pass: @PUSH_PASS@
+    ips: []
+    permissions:
+      - action: publish
+paths:
+  all_others:
