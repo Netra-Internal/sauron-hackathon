@@ -68,9 +68,15 @@ const log = (...a) => console.log(...a);
   log("B throwaway site", sid);
   try {
     await page.locator(".ctabs button[data-tab=camera]").click();
+    await settle(1500);                                           // the frame panel opens: let the map resize first
     await page.getByRole("button", { name: /Add camera: click where/ }).click();   // picker default: still only
+    await page.evaluate(([lon, lat]) => window.Calib.map().jumpTo({ center: [lon, lat], zoom: 18 }), [prod.lon, prod.lat]);
+    await settle(500);
     const m = await page.evaluate(([lon, lat]) => { const p = window.Calib.map().project([lon, lat]); const r = document.querySelector("#cmap").getBoundingClientRect(); return [r.left + p.x, r.top + p.y]; }, [prod.lon, prod.lat]);
+    log("B place:", m, await page.evaluate(() => [window.Calib.state.mode, window.Calib.state.placeSource, document.querySelector("#cpane select.full")?.value]));
     await page.mouse.click(m[0], m[1]);
+    await settle(3000);
+    log("B after place:", await page.evaluate(() => [window.Calib.state.mode, window.Calib.state.cid]), await page.locator("#toasts").innerText());
     await page.waitForFunction(() => window.Calib.state.d, null, { timeout: 20000 });
     await settle(1500);
     await page.locator("#cpane select.full").first().selectOption("jetson-c920");
@@ -105,7 +111,7 @@ const log = (...a) => console.log(...a);
     await page.screenshot({ path: `${OUT}/calib-saved.png` });
     const cid = await page.evaluate(() => window.Calib.state.cid);
     const saved = (await api("GET", `/calib/sites/${sid}`)).body.cameras.find(c => c.id === cid);
-    log("B saved in netra-ask:", cid, "calibrated", saved.calibrated, "n", saved.fit?.n, "LOO", JSON.stringify(saved.fit?.loo), "== draft:", JSON.stringify(saved.fit?.loo) === JSON.stringify(draft.loo));
+    log("B saved in netra-ask:", cid, "calibrated", saved.calibrated, "n", saved.fit?.n, "LOO", JSON.stringify(saved.fit?.loo), "== draft:", ["per_point_m", "median_m", "max_m"].every(k => JSON.stringify(saved.fit?.loo?.[k]) === JSON.stringify(draft.loo[k])));
     log("B toast/pane:", await page.locator("#toasts").innerText().then(t => t.replace(/\n/g, " | ")));
     const ppl = await page.locator("#cpeople").innerText();
     log("B people:", ppl);
