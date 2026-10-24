@@ -72,7 +72,43 @@ const C = {
   d: null,               // draft: {points, model, fit_position, frame, fit, footprint, dirty, fitting, fitErr}
   mode: null, pending: null, sel: null, bdraft: null,
   people: null, peopleErr: null, peopleT: null, fitSeq: 0, fitT: null, saving: false,
+  ptzCams: new Set(), ptzSt: null, ptzErr: null, ptzT: null,   // PTZ cameras (hackdash.ptz) and the live pose of this one
 };
+const feedOf = () => rec()?.source?.camera_id || C.freezeFrom || C.feed;
+const isPtz = () => C.ptzCams.has(feedOf());
+// = hackdash.ptz calib_check thresholds: off by more than this = a different view
+const moved = (a, b) => !!(a && b) && (Math.abs(((a.pan - b.pan + 540) % 360) - 180) > 0.5 || Math.abs(a.tilt - b.tilt) > 0.5 || Math.abs(a.zoom - b.zoom) > 50);
+const poseTxt = p => `pan ${fx(p.pan, 1)}° tilt ${fx(p.tilt, 1)}° zoom ${p.zoom_x != null ? `${fx(p.zoom_x, 1)}×` : fx(p.zoom, 0)}`;
+function openPtzWidget() {                     // the SAME widget as the send-drone page (ptz.js), over this screen
+  const cam = feedOf();
+  if (window.Ptz) return window.Ptz.open(cam);
+  loadOnce("link", { rel: "stylesheet", href: `/hack/static/ptz.css?v=${Date.now()}` });
+  loadOnce("script", { src: `/hack/static/ptz.js?v=${Date.now()}` }).then(() => window.Ptz.open(cam)).catch(err => toast(err.message));
+}
+async function pollPtz() {
+  clearTimeout(C.ptzT);
+  if (!root || root.classList.contains("hidden") || !isPtz()) { C.ptzSt = null; renderPtz(); return; }
+  try { C.ptzSt = await api(`/ptz/${encodeURIComponent(feedOf())}/state`); C.ptzErr = null; } catch (err) { C.ptzSt = null; C.ptzErr = err.message; }
+  renderPtz();
+  C.ptzT = setTimeout(pollPtz, 2000);
+}
+function ptzChips() {
+  const st = C.ptzSt, d = C.d, c = rec();
+  if (!isPtz()) return "";
+  if (!st) return `<span class="chip amber">PTZ: ${esc(C.ptzErr ? `camera not reachable (${C.ptzErr})` : "reading position…")}</span>`;
+  const out = [];
+  const saved = c?.calibrated ? c.frame?.ptz : null;
+  if (c?.calibrated) out.push(!saved ? `<span class="chip amber" title="This calibration was saved without a PTZ position">calibrated pose unknown</span>`
+    : moved(st, saved) ? `<span class="chip red" title="Calibrated at ${esc(poseTxt(saved))}">PTZ moved off calibrated view</span>` : `<span class="chip green">PTZ at calibrated view</span>`);
+  if (d?.frame?.kind === "frozen" && d.frame.ptz && moved(st, d.frame.ptz)) out.push(`<span class="chip red" title="Frozen at ${esc(poseTxt(d.frame.ptz))}">PTZ moved since freeze</span>`);
+  return out.join(" ");
+}
+function renderPtz() {
+  const el = $("#cb-ptz"); if (el) el.innerHTML = C.tab === "camera" ? ptzChips() : "";
+  const p = $("#cptz"); if (!p) return;
+  const st = C.ptzSt;
+  p.innerHTML = `<div class="mono">${st ? `now: ${esc(poseTxt({ ...st, zoom_x: st.zoom_info?.x }))} · ${fx(st.zoom_info?.hfov_deg, 1)}° wide` : esc(C.ptzErr || "…")}</div><div class="row" style="margin-top:4px">${ptzChips()}</div>`;
+}
 const rec = () => C.site?.cameras.find(c => c.id === C.cid) || null;
 const frameCam = () => C.d?.frame && { ...C.d.model, width: C.d.frame.width, height: C.d.frame.height };
 const fitLine = f => f ? `${f.n} pairs · ${fx(f.rms_px)} px · ${f.loo?.median_m != null ? `±${fx(f.loo.median_m)} m checked` : `±${fx(f.ground_err_m)} m in-sample`}` : "";
@@ -101,7 +137,7 @@ async function build() {
     <header class="cbar"><button type="button" class="btn ghost" id="cb-close">← Send drone</button><span class="title">Calibrate</span>
       <div class="ctabs"><button type="button" data-tab="camera">Camera</button><button type="button" data-tab="site">Site setup</button></div>
       <select id="cb-site" aria-label="Site"></select><select id="cb-cam" aria-label="Camera record"></select>
-      <div class="grow"></div><span id="cb-state" class="small"></span></header>
+      <div class="grow"></div><span id="cb-ptz" class="small"></span><span id="cb-state" class="small"></span></header>
     <aside id="cpane"></aside>
     <section id="cframe"><div class="framebar"><span id="cf-cap" class="small"></span><div class="grow"></div><span id="cf-read" class="mono small"></span></div>
       <div id="cf-box"><img id="cf-img" alt="Frozen calibration frame"><svg id="cf-over"></svg><div id="cf-none" class="empty"></div></div></section>
@@ -159,7 +195,8 @@ async function open(feed, tab) {
   map.resize();
   C.feed = feed || C.feed; C.tab = tab === "site" ? "site" : "camera"; C.mode = null; C.pending = null; C.sel = null; C.bdraft = null; hint();
   try {
-    const r = await api("/calib/sites");
+    const [r, pz] = await Promise.all([api("/calib/sites"), api("/ptz").catch(() => [])]);
+    C.ptzCams = new Set(pz.map(c => c.camera_id));
     // only feeds with a current picture (the page's camera list, hack.js S.cams) can be frozen from or linked
     const live = new Set((typeof S !== "undefined" && S.cams || []).filter(c => c.live).map(c => c.camera_id));
     C.sites = r.sites; C.liveCams = r.live_cameras.filter(l => live.has(l.id));
@@ -175,9 +212,9 @@ async function open(feed, tab) {
     else if (C.sites.length) await loadSite(C.sites[0].id);
     else { C.site = null; C.cid = null; C.d = null; }
   } catch (err) { if (err.status !== 401) toast(`Couldn't load sites: ${err.message}`); }
-  render();
+  render(); pollPtz();
 }
-function close() { root.classList.add("hidden"); stopPeople(); }
+function close() { root.classList.add("hidden"); stopPeople(); clearTimeout(C.ptzT); }
 async function loadSite(sid, keepCid) {
   C.site = await api(`/calib/sites/${encodeURIComponent(sid)}`);
   const cid = keepCid && C.site.cameras.some(c => c.id === keepCid) ? keepCid
@@ -194,7 +231,7 @@ function selectRecord(cid, quiet) {
   if (C.d?.dirty && !quiet && !confirm("Discard the unsaved draft of this camera?")) { render(); return; }
   C.cid = cid; C.sel = null; C.pending = null; C.mode = null; hint();
   C.d = rec() ? draftFrom(rec()) : null;
-  stopPeople(); startPeople();
+  stopPeople(); startPeople(); pollPtz();
   if (!quiet) { flyTo(); render(); }
 }
 async function newSite() {
@@ -231,12 +268,13 @@ async function refit() {
 
 async function freeze() {
   const d = C.d, c = rec();
-  const feed = c?.source?.camera_id || C.freezeFrom || C.feed;
+  const feed = feedOf();
   if (!feed) { toast("Pick the live feed to freeze a frame from."); return; }
   if (d.points.length && !confirm(`Freeze a new frame? The ${d.points.length} map points are kept: you'll re-click each one in the new picture (or skip it).`)) return;
   try {
     const f = await send("POST", `/calib/freeze/${encodeURIComponent(feed)}`);
-    d.frame = { kind: "frozen", ...f, from: f.source === "ring" ? `live:${feed}` : `netra-ask preview of ${feed}`, url: `${API}/${f.url}` };
+    d.frame = { kind: "frozen", ...f, from: f.source === "ring" ? `live:${feed}` : f.source === "ptz" ? `${feed} at ${poseTxt(f.ptz)}` : `netra-ask preview of ${feed}`, url: `${API}/${f.url}` };
+    if (f.ptz) toast(`Frozen at ${poseTxt(f.ptz)}. Saving records this position with the calibration.`);
     if (f.age_s > 60) toast(`${feed}'s live feed has no current frame: froze its newest picture, ${Math.round(f.age_s / 60)} min old. Fine if the camera hasn't moved.`);
     d.redo = [...(d.redo || []), ...d.points.map(({ lat, lon, label }) => ({ lat, lon, label }))];
     d.points = []; d.fit = null; d.footprint = null; C.sel = null; C.pending = null;
@@ -250,6 +288,7 @@ async function save() {
   if (!d || C.saving) return;
   if (c.calibrated && d.points.length < 2 && !confirm(`Saving with ${d.points.length} pair(s) removes the calibration of “${c.name}”: its people stop landing on the map. Continue?`)) return;
   if (d.frame?.kind === "frozen" && c.calibrated && !confirm(`Replace the saved frame and calibration of “${c.name}” (${fitLine(c.fit)}) with this draft?`)) return;
+  if (d.frame?.kind === "frozen" && d.frame.ptz && C.ptzSt && moved(C.ptzSt, d.frame.ptz) && !confirm("The camera has moved since this frame was frozen. The calibration is saved for the FROZEN position; people are only placed right when the camera is back there. Save anyway?")) return;
   C.saving = true; renderState();
   try {
     let r;
@@ -321,7 +360,7 @@ function render() {
   const pane = $("#cpane"); const keep = pane.scrollTop; pane.innerHTML = "";
   if (!C.site) paneNoSite(pane); else if (C.tab === "site") paneSite(pane); else paneCam(pane);
   pane.scrollTop = keep;
-  renderState(); drawMap(); drawFrame();
+  renderState(); drawMap(); drawFrame(); renderPtz();
 }
 function renderState() {
   const d = C.d, el = $("#cb-state"); if (!el) return;
@@ -351,16 +390,20 @@ function paneCam(pane) {
 
   // 1 frame
   pane.append(h(`<div class="label"><span>1 · Frame</span></div>`));
-  if (d.frame) pane.append(h(`<div class="muted small">${d.frame.kind === "frozen" ? "<b>Draft</b> frame frozen" : "Saved frame"} ${d.frame.width}×${d.frame.height} from ${esc(d.frame.from || "?")}, taken ${esc(ago(d.frame.captured_at))}.</div>`));
+  if (d.frame) pane.append(h(`<div class="muted small">${d.frame.kind === "frozen" ? "<b>Draft</b> frame frozen" : "Saved frame"} ${d.frame.width}×${d.frame.height} from ${esc(d.frame.from || "?")}, taken ${esc(ago(d.frame.captured_at))}.${d.frame.ptz && d.frame.kind === "saved" ? ` PTZ position: ${esc(poseTxt(d.frame.ptz))}.` : ""}</div>`));
   else pane.append(h(`<p class="muted small">No frame yet. Freeze one from the live feed. Points you click are on this picture.</p>`));
+  if (isPtz()) {
+    pane.append(h(`<div class="step"><b>PTZ camera.</b> Aim and zoom it first, then freeze. The calibration is only valid at the position it was frozen at${d.frame?.ptz ? ` (this frame: ${esc(poseTxt(d.frame.ptz))})` : ""}.<div id="cptz" class="small" style="margin-top:6px"></div></div>`));
+    pane.append(btn("Aim / zoom the camera", d.frame ? "" : "primary", openPtzWidget));
+  }
   if (d.frame?.kind === "frozen" && d.frame.age_s > 60) pane.append(h(`<div class="step warn">This picture is ${Math.round(d.frame.age_s / 60)} min old: the live feed had no current frame (${esc(d.frame.from)}). If the camera moved since, freeze again once the feed is back.</div>`));
   const frow = h(`<div class="row" style="margin-top:6px"></div>`);
   if (!feed) {
     const sel = h(`<select class="full"><option value="">Freeze from…</option>${C.liveCams.map(l => `<option value="${esc(l.id)}" ${(C.freezeFrom || C.feed) === l.id ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select>`);
-    sel.onchange = () => { C.freezeFrom = sel.value || null; };
+    sel.onchange = () => { C.freezeFrom = sel.value || null; pollPtz(); render(); };
     frow.append(sel);
   }
-  frow.append(btn(d.frame ? "Freeze a new frame" : "Freeze the live frame", d.frame ? "" : "primary", freeze));
+  frow.append(btn(d.frame ? "Freeze a new frame" : isPtz() ? "Freeze the camera's current view" : "Freeze the live frame", d.frame ? "" : "primary", freeze));
   pane.append(frow);
 
   // 2 pairs + fit
