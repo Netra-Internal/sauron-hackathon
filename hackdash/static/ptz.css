@@ -1,0 +1,29 @@
+/* Move camera screen (ptz.js), over the send-drone page. Tokens (--bg, --panel, ...) come from hack.css. */
+#ptz { position: fixed; inset: 0; z-index: 11; background: var(--bg); display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px; grid-template-rows: 54px calc(100vh - 54px);
+  grid-template-areas: "pbar pbar" "pview pside"; }
+#ptz.hidden { display: none; }
+#ptz .pbar { grid-area: pbar; display: flex; align-items: center; gap: 10px; padding: 0 14px; background: var(--panel); border-bottom: 1px solid var(--line); min-width: 0; }
+#ptz .pbar .grow { flex: 1; }
+#ptz .chip.bad { background: color-mix(in srgb, var(--bad) 20%, transparent); color: var(--bad); }
+#ptz .chip.amber { color: var(--warn); }
+#ptz .chip:empty { display: none; }
+#p-view { grid-area: pview; position: relative; display: flex; align-items: center; justify-content: center; background: #0b0c0e; min-width: 0; min-height: 0; }
+#p-img { max-width: 100%; max-height: 100%; cursor: crosshair; user-select: none; -webkit-user-drag: none; }
+#p-img.hidden, #p-none.hidden { display: none; }
+#p-none { color: #9aa0aa; }
+#ptz .p-hint { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); background: rgba(17,19,22,.85); color: #fff;
+  padding: 5px 12px; border-radius: 99px; font-size: 12.5px; pointer-events: none; white-space: nowrap; }
+#p-side { grid-area: pside; background: var(--panel); border-left: 1px solid var(--line); padding: 14px; display: flex; flex-direction: column; gap: 14px; overflow: auto; }
+#ptz .p-pos { font-size: 14px; line-height: 1.6; }
+#ptz .p-pad { display: grid; grid-template-columns: repeat(3, 64px); grid-template-rows: repeat(3, 56px); gap: 6px; justify-content: center; }
+#ptz .p-pad .btn, #ptz .p-zoom .btn { font-size: 18px; touch-action: none; user-select: none; }
+#ptz .p-zoom, #ptz .p-home { display: flex; gap: 8px; }
+#ptz .p-zoom .btn, #ptz .p-home .btn { flex: 1; font-size: 14px; }
+#ptz .btn:active { background: var(--chip); }
+#ptz .bad { color: var(--bad); }
+#ptz label input { vertical-align: middle; width: 140px; }
+@media (max-width: 760px) {
+  #ptz { grid-template-columns: 1fr; grid-template-rows: 54px 45vh minmax(0, 1fr); grid-template-areas: "pbar" "pview" "pside"; }
+  #ptz .p-hint { display: none; }
+}
