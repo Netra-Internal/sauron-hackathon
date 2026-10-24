@@ -88,7 +88,7 @@ function openCalib(cam, tab) {
   if (window.Calib) return window.Calib.open(cam, tab);
   const s = document.createElement("script"); s.src = `/hack/static/calib.js?v=${Date.now()}`; s.onload = () => window.Calib.open(cam, tab); document.head.append(s);
 }
-document.querySelector("#topbar .grow")?.after(btn("Site setup", "ghost", () => openCalib(S.cam, "site")));
+document.querySelector("#topbar .grow")?.after(btn("Calibrate / site setup", "ghost", () => openCalib(S.cam, "site")));
 
 // ------------------------------------------------------------------ the open camera, live (centre)
 function openCamera(id) {

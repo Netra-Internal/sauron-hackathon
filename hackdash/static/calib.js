@@ -231,12 +231,14 @@ async function freeze() {
   const d = C.d, c = rec();
   const feed = c?.source?.camera_id || C.freezeFrom || C.feed;
   if (!feed) { toast("Pick the live feed to freeze a frame from."); return; }
-  if (d.points.length && !confirm(`A new frame clears the ${d.points.length} draft point pair(s) (their pixels are on the old picture). Continue?`)) return;
+  if (d.points.length && !confirm(`Freeze a new frame? The ${d.points.length} map points are kept: you'll re-click each one in the new picture (or skip it).`)) return;
   try {
     const f = await send("POST", `/calib/freeze/${encodeURIComponent(feed)}`);
     d.frame = { kind: "frozen", ...f, from: f.source === "ring" ? `live:${feed}` : `netra-ask preview of ${feed}`, url: `${API}/${f.url}` };
     if (f.age_s > 60) toast(`${feed}'s live feed has no current frame: froze its newest picture, ${Math.round(f.age_s / 60)} min old. Fine if the camera hasn't moved.`);
+    d.redo = [...(d.redo || []), ...d.points.map(({ lat, lon, label }) => ({ lat, lon, label }))];
     d.points = []; d.fit = null; d.footprint = null; C.sel = null; C.pending = null;
+    if (d.redo.length) { C.mode = "pair"; hint(`Click map point ${d.points.length + 1} (white, on the map) in the new frame`); }
     changed();
   } catch (err) { toast(`Couldn't freeze a frame: ${err.message}`); }
 }
@@ -347,6 +349,7 @@ function paneCam(pane) {
   pane.append(h(`<div class="label"><span>1 · Frame</span></div>`));
   if (d.frame) pane.append(h(`<div class="muted small">${d.frame.kind === "frozen" ? "<b>Draft</b> frame frozen" : "Saved frame"} ${d.frame.width}×${d.frame.height} from ${esc(d.frame.from || "?")}, taken ${esc(ago(d.frame.captured_at))}.</div>`));
   else pane.append(h(`<p class="muted small">No frame yet. Freeze one from the live feed. Points you click are on this picture.</p>`));
+  if (d.frame?.kind === "frozen" && d.frame.age_s > 60) pane.append(h(`<div class="step warn">This picture is ${Math.round(d.frame.age_s / 60)} min old: the live feed had no current frame (${esc(d.frame.from)}). If the camera moved since, freeze again once the feed is back.</div>`));
   const frow = h(`<div class="row" style="margin-top:6px"></div>`);
   if (!feed) {
     const sel = h(`<select class="full"><option value="">Freeze from…</option>${C.liveCams.map(l => `<option value="${esc(l.id)}" ${(C.freezeFrom || C.feed) === l.id ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select>`);
@@ -360,7 +363,11 @@ function paneCam(pane) {
   pane.append(h(`<div class="label"><span>2 · Point pairs</span><span>${d.points.length}</span></div>`));
   if (!d.frame) pane.append(h(`<p class="muted small">Then click points that are on the ground and easy to find on the satellite map: kerb corners, paint, drain covers, path junctions. Spread them near and far.</p>`));
   else {
-    if (C.mode === "pair") pane.append(h(`<div class="step">${C.pending ? (C.pending.u != null ? "Now click the same point on the map." : "Now click the same point in the frame.") : "Click a ground point in the frame, then the same point on the map (either order). Esc to stop."}</div>`));
+    if (d.redo?.length) {
+      const st = h(`<div class="step"><b>Re-place the old map points: ${d.redo.length} left.</b> Click the spot of the <b>white</b> map marker in the new frame. </div>`);
+      st.append(btn("Skip this one", "", () => { d.redo.shift(); render(); }), " ", btn("Drop all", "", () => { d.redo = []; render(); }));
+      pane.append(st);
+    } else if (C.mode === "pair") pane.append(h(`<div class="step">${C.pending ? (C.pending.u != null ? "Now click the same point on the map." : "Now click the same point in the frame.") : "Click a ground point in the frame, then the same point on the map (either order). Esc to stop."}</div>`));
     pane.append(btn(C.mode === "pair" ? "Done adding" : "Add point pairs", C.mode === "pair" ? "on" : "primary", () => {
       C.mode = C.mode === "pair" ? null : "pair"; C.pending = null; hint(C.mode === "pair" ? "Pair mode: frame point ↔ map point · Esc to stop" : ""); render();
     }));
@@ -448,16 +455,18 @@ function renderPeople() {
 }
 function addCameraControls(pane) {
   const live = C.liveCams.find(l => l.id === C.feed);
-  const linked = C.feed && C.site.cameras.some(c => c.source?.camera_id === C.feed && c.calibrated);
   const row = h(`<div class="row"></div>`);
   if (C.mode === "place") {
     row.append(h(`<div class="step">Click the map where the camera is mounted · Esc to cancel</div>`));
   } else {
-    if (live) row.append(btn(`Add ${live.id} here`, rec() ? "" : "primary", () => {
-      if (linked && !confirm(`${C.feed} already has a calibrated record. A second one, once saved, takes over its people → map projection (newest wins). Add anyway?`)) return;
-      C.mode = "place"; C.placeSource = live.id; hint("Click the map where the camera is mounted · Esc to cancel"); render();
+    const sel = h(`<select class="full"><option value="">Still only (no live feed)</option>${C.liveCams.map(l => `<option value="${esc(l.id)}" ${l.id === (C.addFrom ?? live?.id) ? "selected" : ""}>${esc(l.name)} (${esc(l.id)})</option>`).join("")}</select>`);
+    sel.onchange = () => { C.addFrom = sel.value; };
+    row.append(sel);
+    row.append(btn("Add camera: click where it's mounted", rec() ? "" : "primary", () => {
+      const src = sel.value || null;
+      if (src && C.site.cameras.some(c => c.source?.camera_id === src && c.calibrated) && !confirm(`${src} already has a calibrated record. A second one, once saved, takes over its people → map projection (newest wins). To redo it, recalibrate the existing record instead. Add anyway?`)) return;
+      C.mode = "place"; C.placeSource = src; hint("Click the map where the camera is mounted · Esc to cancel"); render();
     }));
-    row.append(btn("Add a still-only camera", "", () => { C.mode = "place"; C.placeSource = null; hint("Click the map where the camera is mounted · Esc to cancel"); render(); }));
   }
   pane.append(row);
 }
@@ -558,6 +567,7 @@ function drawMap() {
       el.addEventListener("click", ev => { ev.stopPropagation(); C.sel = i; render(); });
       markers.pairs.push(m);
     });
+    (d.redo || []).forEach((p, i) => markers.pairs.push(new maplibregl.Marker({ element: h(`<div class="pairmark pending ${i ? "later" : "sel"}" title="Old map point: click its spot in the new frame">${d.points.length + i + 1}</div>`) }).setLngLat([p.lon, p.lat]).addTo(map)));
     if (C.pending?.lat != null) markers.pending = new maplibregl.Marker({ element: h(`<div class="pairmark pending">${d.points.length + 1}</div>`) }).setLngLat([C.pending.lon, C.pending.lat]).addTo(map);
   }
   drawPeople();
@@ -584,7 +594,7 @@ function onMapMove(e) {
 function addPair(p) {
   C.d.points.push({ u: p.u, v: p.v, lat: p.lat, lon: p.lon });
   C.pending = null; C.sel = C.d.points.length - 1;
-  hint("Pair added · next point, or Done adding");
+  hint(C.d.redo?.length ? `Pair added · now click map point ${C.d.points.length + 1} (white) in the frame` : "Pair added · next point, or Done adding");
   changed();
 }
 
@@ -652,8 +662,9 @@ function framePx(ev) {
   return [(ev.clientX - r.left) * f.width / r.width, (ev.clientY - r.top) * f.height / r.height];
 }
 function onFrameClick(ev) {
-  if (!C.d?.frame || C.mode !== "pair") return;
+  if (!C.d?.frame || (C.mode !== "pair" && !C.d.redo?.length)) return;
   const [u, v] = framePx(ev);
+  if (C.d.redo?.length && C.pending?.lat == null) { addPair({ ...C.d.redo.shift(), u, v }); return; }
   if (C.pending?.lat != null) addPair({ ...C.pending, u, v });
   else { C.pending = { u, v }; hint("Now click the same point on the map"); render(); }
 }

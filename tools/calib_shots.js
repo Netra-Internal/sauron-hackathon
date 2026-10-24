@@ -43,6 +43,22 @@ const log = (...a) => console.log(...a);
   await page.screenshot({ path: `${OUT}/calib-camera.png` });
   log("A2 camera tab:", await page.locator("#cpane").innerText().then(t => t.slice(0, 900).replace(/\n/g, " | ")));
   const prod = (await api("GET", `/calib/sites/${PROD_SITE}`)).body.cameras.find(c => c.id === "camera-1-5621");
+  // A3: recalibrate the production camera as a DRAFT only: re-freeze, re-place 4 old map points, look, Discard
+  await page.getByRole("button", { name: "Freeze a new frame" }).click();
+  await page.waitForFunction(() => window.Calib.state.d?.frame?.kind === "frozen" && document.querySelector("#cf-img")?.naturalWidth > 0, null, { timeout: 30000 });
+  await settle(1000);
+  for (const [fu, fv] of [[0.30, 0.80], [0.55, 0.75], [0.75, 0.85], [0.45, 0.92]]) {
+    const ib = await page.locator("#cf-img").boundingBox();
+    await page.mouse.click(ib.x + fu * ib.width, ib.y + fv * ib.height);
+    await settle(300);
+  }
+  await page.waitForFunction(() => !window.Calib.state.d.fitting, null, { timeout: 30000 });
+  await settle(2500);
+  await page.screenshot({ path: `${OUT}/calib-recal.png` });
+  log("A3 recal draft:", await page.locator("#cpane").innerText().then(t => t.slice(0, 900).replace(/\n/g, " | ")));
+  await page.getByRole("button", { name: "Discard draft" }).click();
+  await settle(1000);
+  log("A3 discarded:", await page.evaluate(() => [window.Calib.state.d.dirty, window.Calib.state.d.points.length, window.Calib.state.d.frame.kind]));
 
   // ---- B: throwaway, through the UI
   const prodSite = (await api("GET", `/calib/sites/${PROD_SITE}`)).body;
@@ -52,12 +68,12 @@ const log = (...a) => console.log(...a);
   log("B throwaway site", sid);
   try {
     await page.locator(".ctabs button[data-tab=camera]").click();
-    await page.getByRole("button", { name: "Add a still-only camera" }).click();
+    await page.getByRole("button", { name: /Add camera: click where/ }).click();   // picker default: still only
     const m = await page.evaluate(([lon, lat]) => { const p = window.Calib.map().project([lon, lat]); const r = document.querySelector("#cmap").getBoundingClientRect(); return [r.left + p.x, r.top + p.y]; }, [prod.lon, prod.lat]);
     await page.mouse.click(m[0], m[1]);
     await page.waitForFunction(() => window.Calib.state.d, null, { timeout: 20000 });
     await settle(1500);
-    await page.selectOption("#cpane select.full", "jetson-c920");
+    await page.locator("#cpane select.full").first().selectOption("jetson-c920");
     await page.getByRole("button", { name: /Freeze the live frame/ }).click();
     await page.waitForFunction(() => document.querySelector("#cf-img")?.naturalWidth > 0 && window.Calib.state.d?.frame?.kind === "frozen", null, { timeout: 30000 });
     await settle(1000);
