@@ -3,6 +3,7 @@
 # ~1.4 Mbit/s) to the pod's mediamtx as path <camera id>, over RTSPS inside one SSH tunnel through the droplet
 # (office egress allows only a few ports, e.g. 22/443, never RunPod's random ones; the droplet account `cloudrelay` may
 # only port-forward to the pod's RTSPS port). Adding a camera on this box = one more "id=rtsp://..." word in STREAMS.
+# A camera may list fallbacks, "id=rtsp://first|rtsp://second": each (re)connect tries them in order.
 # Wi-Fi only: the route to the relay must leave through $WIFI_IF, checked before connecting and every 10 s; if it moves
 # (Wi-Fi down, default route on LTE: lte0 is capped at 25 MB/h) everything is killed and nothing is sent until it's back.
 #   env (/etc/netra-cloud-push.env): STREAMS="jetson-c920=rtsp://127.0.0.1:8556/c920 [id=url ...]"  POD=ip:port
@@ -23,11 +24,16 @@ while true; do
   for s in $STREAMS; do
     cam=${s%%=*}; src=${s#*=}
     ( while true; do
-        "$FF" -hide_banner -loglevel warning -nostdin -rtsp_transport tcp -timeout 10000000 -i "$src" -map 0:v:0 -c copy -an \
-              -f rtsp -rtsp_transport tcp "rtsps://pusher:${PUSH_PASS}@127.0.0.1:$LPORT/$cam"
-        echo "$(date -u +%T) $cam push exited $?; retry in 5 s"; sleep 5
+        IFS='|' read -ra srcs <<< "$src"
+        for one in "${srcs[@]}"; do
+          echo "$(date -u +%T) $cam trying ${one//:*@/://***@}"
+          "$FF" -hide_banner -loglevel warning -nostdin -rtsp_transport tcp -timeout 5000000 -i "$one" -map 0:v:0 -c copy -an \
+                -f rtsp -rtsp_transport tcp "rtsps://pusher:${PUSH_PASS}@127.0.0.1:$LPORT/$cam"
+          echo "$(date -u +%T) $cam push from ${one//:*@/://***@} exited $?"
+        done
+        sleep 5
       done ) &
-    pids+=($!); echo "$(date -u +%T) pushing $cam ($src) -> pod $POD via $RELAY"
+    pids+=($!); echo "$(date -u +%T) pushing $cam (${src//:*@/://***@}) -> pod $POD via $RELAY"
   done
   while kill -0 "${pids[0]}" 2>/dev/null && via_wifi; do sleep 10; done
   echo "$(date -u +%T) tunnel down or route left $WIFI_IF; stopping all pushes"; stop_all; sleep 5
