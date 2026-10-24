@@ -181,7 +181,9 @@ function chipHTML(b, k, stale) {
   const p = S.pending.get(b.track_uuid), L = b.label, inc = sentInc(b), id = shortId(b.track_uuid);
   const sus = L ? `${esc(L.verdict)}${L.why_label ? ` · ${esc(L.why_label)}` : ""}${L.e != null ? ` · E ${fx(L.e, 2)}` : ""}` : "—";
   const facts = L?.facts ? Object.entries(L.facts).slice(0, 2).map(([f, v]) => `${f} ${typeof v === "number" ? fx(v, 2) : v}`).join(" · ") : "";
-  const why = L ? `<div class="why">${facts ? `${esc(facts)} · ` : ""}scene facts · Jev pointed at this person${L.caption ? `<br>${esc(L.caption)}` : ""}</div>` : "";
+  // an operator launch is the operator's call, not the judge's: never dress it up as Jev's verdict
+  const op = /operator/i.test(`${L?.why_label || ""} ${L?.why || ""}`);
+  const why = L && !op ? `<div class="why">${facts ? `${esc(facts)} · ` : ""}scene facts · Jev pointed at this person${L.caption ? `<br>${esc(L.caption)}` : ""}</div>` : "";
   let acts;
   if (inc) acts = `<span class="sentlbl">drone sent</span><button class="no open" data-inc="${esc(inc.id)}">Incident</button>`;
   else if (p?.state === "confirm") acts = `<span>Send drone to ${esc(id)}?</span><button class="yes">Yes</button><button class="no">Cancel</button>`;

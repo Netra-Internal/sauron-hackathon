@@ -9,6 +9,14 @@ HOST=${HACK_HOST:-root@104.131.163.205}
 SRC=$(cd "${1:-$(dirname "$0")/..}" && pwd)
 DEST=/opt/netra/sauron-hack
 
+# every deploy must contain origin/main (the manager's integrated routers), or it ships stale code over them
+git -C "$SRC" fetch -q origin
+if ! git -C "$SRC" merge-base --is-ancestor origin/main HEAD; then
+  echo "refusing: $SRC does not contain origin/main ($(git -C "$SRC" rev-parse --short origin/main)); git merge origin/main first" >&2; exit 1
+fi
+if [ -n "$(git -C "$SRC" status --porcelain -- hackdash deploy requirements.txt)" ]; then
+  echo "refusing: uncommitted changes under hackdash/, deploy/ or requirements.txt; commit them first" >&2; exit 1
+fi
 echo "== ship $SRC -> $HOST:$DEST ($(git -C "$SRC" rev-parse --abbrev-ref HEAD 2>/dev/null) $(git -C "$SRC" rev-parse --short HEAD 2>/dev/null))"
 ssh "$HOST" "mkdir -p $DEST"
 rsync -rlt --exclude __pycache__ --exclude .venv "$SRC/hackdash" "$SRC/deploy" "$SRC/requirements.txt" "$HOST:$DEST/"
