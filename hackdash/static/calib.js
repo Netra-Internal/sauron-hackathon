@@ -160,7 +160,9 @@ async function open(feed, tab) {
   C.feed = feed || C.feed; C.tab = tab === "site" ? "site" : "camera"; C.mode = null; C.pending = null; C.sel = null; C.bdraft = null; hint();
   try {
     const r = await api("/calib/sites");
-    C.sites = r.sites; C.liveCams = r.live_cameras;
+    // only feeds with a current picture (the page's camera list, hack.js S.cams) can be frozen from or linked
+    const live = new Set((typeof S !== "undefined" && S.cams || []).filter(c => c.live).map(c => c.camera_id));
+    C.sites = r.sites; C.liveCams = r.live_cameras.filter(l => live.has(l.id));
     // the record this feed's projection uses: the newest calibrated one linking it (= ask.sitemap._row_for), else any
     let pick = null;
     const better = (a, b) => !b || a.calibrated !== b.calibrated ? a.calibrated || !b : a.updated_at > b.updated_at;
