@@ -59,7 +59,7 @@ PY
   else cp "$BAK" $SITE; echo "nginx -t failed: restored $BAK"; exit 1; fi
 else echo "nginx: /hack/ block already present"; fi
 
-sleep 2
+for i in $(seq 30); do [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8500/hack/api/health)" = 401 ] && break; sleep 0.5; done
 systemctl is-active sauron-hack
 echo "unauthenticated /hack/api/health -> $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8500/hack/api/health) (401 expected)"
 echo "unauthenticated /hack/ -> $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/hack/) (303 to login expected)"
