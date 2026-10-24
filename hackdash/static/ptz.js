@@ -36,6 +36,9 @@ function build() {
       </div>
       <div class="p-zoom"><button class="btn" data-m="0,0,-1" title="Zoom out (−)">− Zoom out</button><button class="btn" data-m="0,0,1" title="Zoom in (+)">+ Zoom in</button></div>
       <label class="small">Speed <input type="range" id="p-speed" min="0.02" max="1" step="0.01" value="0.15"> <span id="p-speedv" class="mono"></span></label>
+      <div class="p-dn" id="p-dn" title="IR-cut filter: Day = colour, Night = IR (the IR lights follow), Auto = the camera picks">
+        <button class="btn" data-dn="day">Day</button><button class="btn" data-dn="night">Night (IR)</button><button class="btn" data-dn="auto">Auto</button></div>
+      <div id="p-pic" class="small muted"></div>
       <div class="p-home"><button class="btn" id="p-goto">Go Home</button><button class="btn" id="p-save">Save as Home</button></div>
       <div id="p-note" class="small"></div>
     </div>`;
@@ -49,6 +52,10 @@ function build() {
     b.onpointerdown = e => { e.preventDefault(); b.setPointerCapture(e.pointerId); hold({ pan, tilt, zoom }); };
     for (const ev of ["pointerup", "pointercancel", "lostpointercapture"]) b.addEventListener(ev, () => release());
   }
+  for (const b of root.querySelectorAll("[data-dn]")) b.onclick = async () => {
+    try { const r = await post(`/ptz/${encodeURIComponent(P.cam)}/daynight`, { mode: b.dataset.dn }); P.dn = r.mode; renderDn(); setTimeout(pollDn1, 2500); toast(`Camera: ${b.textContent}`); }
+    catch (err) { toast(`Day/Night failed: ${err.message}`); }
+  };
   $("#p-goto").onclick = () => cmd("/home", "Going to Home");
   $("#p-save").onclick = () => { if (confirm("Save the camera's current view as Home?")) cmd("/home/save", "Saved as Home"); };
   const img = $("#p-img");
@@ -123,6 +130,19 @@ function snap(gen) {
   if (!P.open || gen !== P.snapGen) return;
   $("#p-img").src = `${API}/ptz/${encodeURIComponent(P.cam)}/snapshot.jpg?t=${Date.now()}`;
 }
+async function pollDn1() {
+  try { const r = await api(`/ptz/${encodeURIComponent(P.cam)}/daynight`); P.dn = r.mode; P.pic = r.picture; renderDn(); } catch {}
+}
+async function pollDn() {
+  if (!P.open) return;
+  try { const r = await api(`/ptz/${encodeURIComponent(P.cam)}/daynight`); P.dn = r.mode; P.pic = r.picture; } catch { P.dn = null; P.pic = null; }
+  renderDn();
+  setTimeout(pollDn, 5000);
+}
+function renderDn() {
+  for (const b of root.querySelectorAll("[data-dn]")) b.classList.toggle("on", b.dataset.dn === P.dn);
+  $("#p-pic").textContent = P.pic ? `Picture now: ${P.pic}` : "";
+}
 function render() {
   $("#p-cam").textContent = P.cam;
   const s = P.st;
@@ -143,7 +163,7 @@ async function open(cam) {
   if (!root) build();
   P.cam = cam; P.open = true; P.st = null; P.err = null; P.ms = []; P.snapGen++;
   root.classList.remove("hidden");
-  render(); poll(); snap(P.snapGen);
+  render(); poll(); pollDn(); snap(P.snapGen);
 }
 function close() { release(); P.open = false; P.snapGen++; root.classList.add("hidden"); }
 window.Ptz = { open, close, state: P };

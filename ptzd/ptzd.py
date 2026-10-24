@@ -14,6 +14,9 @@ through an SSH tunnel.
   POST /center?x=&y=&w=&h=[&zoom=]      areazoom: pixel (x, y) of a w x h image becomes the centre; zoom % (100 = same)
   POST /goto?name=  POST /save?name=    server presets, names from PTZD_PRESETS only (default "hack-home")
   GET  /snapshot.jpg?resolution=        image.cgi at an allowed resolution
+  GET  /daynight  POST /daynight?mode=  IR-cut filter: day (filter in, colour) | night (filter out, IR) | auto. On this PTZ
+                                        firmware it is ptz.cgi `ircutfilter=on|off|auto`; the IR LEDs follow it (lightcontrol
+                                        synchronizeDayNightMode). GET = the mode last set here (the camera can't be asked)
 
 stdlib only. Env: PTZ_CAM_HOST, PTZ_CAM_USER, PTZ_CAM_PASS (the axis-q6215.env names), PTZD_TOKEN, PTZD_LISTEN.
 """
@@ -37,6 +40,7 @@ log = logging.getLogger("ptzd")
 DEADMAN_S = float(os.environ.get("PTZD_DEADMAN_S", "1.2"))
 PRESETS = set(filter(None, os.environ.get("PTZD_PRESETS", "hack-home").split(",")))
 RESOLUTIONS = {"640x360", "1280x720", "1920x1080"}
+DAYNIGHT = {"day": "on", "night": "off", "auto": "auto"}          # mode -> ptz.cgi ircutfilter
 
 
 class VapixError(Exception):
@@ -163,6 +167,16 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(400, {"error": "x, y inside a w x h image"})
                 cam.ptz(areazoom=f"{x},{y},{z}", imagewidth=w, imageheight=h)
                 out = {"ok": True}
+            elif u.path == "/daynight":
+                if method == "POST":
+                    mode = q.get("mode", "")
+                    if mode not in DAYNIGHT:
+                        return self._json(400, {"error": f"mode one of {sorted(DAYNIGHT)}"})
+                    cam.ptz(ircutfilter=DAYNIGHT[mode])
+                    self.server.daynight = mode
+                # the camera does not report the live filter state (PTZ.Various.V1.IrCutFilter stays at its config
+                # value), so this is the mode set through ptzd since it started, or null
+                out = {"mode": self.server.daynight}
             elif method == "POST" and u.path in ("/goto", "/save"):
                 name = q.get("name", "")
                 if name not in PRESETS:
@@ -194,7 +208,7 @@ class Handler(BaseHTTPRequestHandler):
 def serve(listen: str, cam: Vapix, token: str, deadman_s: float = DEADMAN_S) -> ThreadingHTTPServer:
     host, port = listen.rsplit(":", 1)
     srv = ThreadingHTTPServer((host, int(port)), Handler)
-    srv.cam, srv.token, srv.mover = cam, token, Mover(cam, deadman_s)
+    srv.cam, srv.token, srv.mover, srv.daynight = cam, token, Mover(cam, deadman_s), None
     return srv
 
 
