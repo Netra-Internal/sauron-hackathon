@@ -79,6 +79,11 @@ function renderWall() {
     const cal = h(`<span class="chip calib" role="button" title="Calibrate this camera on the map">Calibrate</span>`);   // calib.js
     cal.onclick = e => { e.stopPropagation(); openCalib(c.camera_id); };
     t.querySelector(".tchips").append(cal);
+    if (S.ptzCams?.has(c.camera_id)) {                                     // ptz.js
+      const mv = h(`<span class="chip calib" role="button" title="Pan / tilt / zoom this camera by hand">Move camera</span>`);
+      mv.onclick = e => { e.stopPropagation(); openPtz(c.camera_id); };
+      t.querySelector(".tchips").append(mv);
+    }
     wall.append(t);
   }
 }
@@ -89,6 +94,17 @@ function openCalib(cam, tab) {
   const s = document.createElement("script"); s.src = `/hack/static/calib.js?v=${Date.now()}`; s.onload = () => window.Calib.open(cam, tab); document.head.append(s);
 }
 document.querySelector("#topbar .grow")?.after(btn("Calibrate / site setup", "ghost", () => openCalib(S.cam, "site")));
+
+// Move camera (hackdash/static/ptz.js, full-screen PTZ control over this page), loaded on first use
+function openPtz(cam) {
+  if (window.Ptz) return window.Ptz.open(cam);
+  const l = document.createElement("link"); l.rel = "stylesheet"; l.href = `/hack/static/ptz.css?v=${Date.now()}`; document.head.append(l);
+  const s = document.createElement("script"); s.src = `/hack/static/ptz.js?v=${Date.now()}`; s.onload = () => window.Ptz.open(cam); document.head.append(s);
+}
+api("/ptz").then(r => {
+  S.ptzCams = new Set(r.map(c => c.camera_id)); renderWall();
+  for (const c of r) document.querySelector("#topbar .grow")?.after(btn(`Move ${c.camera_id}`, "ghost", () => openPtz(c.camera_id)));
+}).catch(() => {});
 
 // ------------------------------------------------------------------ the open camera, live (centre)
 function openCamera(id) {
