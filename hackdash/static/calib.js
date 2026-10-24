@@ -567,6 +567,7 @@ function drawMap() {
       el.addEventListener("click", ev => { ev.stopPropagation(); C.sel = i; render(); });
       markers.pairs.push(m);
     });
+    if (d.redo?.length) { const q = d.redo[0], b = map.getBounds(); if (!b.contains([q.lon, q.lat])) map.easeTo({ center: [q.lon, q.lat] }); }
     (d.redo || []).forEach((p, i) => markers.pairs.push(new maplibregl.Marker({ element: h(`<div class="pairmark pending ${i ? "later" : "sel"}" title="Old map point: click its spot in the new frame">${d.points.length + i + 1}</div>`) }).setLngLat([p.lon, p.lat]).addTo(map)));
     if (C.pending?.lat != null) markers.pending = new maplibregl.Marker({ element: h(`<div class="pairmark pending">${d.points.length + 1}</div>`) }).setLngLat([C.pending.lon, C.pending.lat]).addTo(map);
   }
