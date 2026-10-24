@@ -678,5 +678,5 @@ function dragPoint(ev) {
   window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
 }
 
-window.Calib = { open, close, state: C };
+window.Calib = { open, close, state: C, map: () => map };   // map: for the screenshot test (tools/calib_shots.js)
 })();
