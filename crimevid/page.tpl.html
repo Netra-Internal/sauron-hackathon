@@ -1,0 +1,96 @@
+<title>Sauron Catches Real Crimes</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;800&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one reading column; a results table up top, then one block per clip with its annotated video. */
+:root {
+  --bg: #f3f5f7; --panel: #ffffff; --fg: #1a2230; --muted: #5a6677; --line: #d5dbe3;
+  --deploy: #c8241c; --ok: #1f7a46; --warn: #a86400;
+  --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #11151c; --panel: #181e27; --fg: #e4e9f0; --muted: #94a0b2; --line: #2a3340;
+  --deploy: #ff5a4f; --ok: #4cc485; --warn: #f0a640; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #11151c; --panel: #181e27; --fg: #e4e9f0; --muted: #94a0b2; --line: #2a3340;
+  --deploy: #ff5a4f; --ok: #4cc485; --warn: #f0a640; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 16px/1.55 var(--body); }
+main { max-width: 1120px; margin: 0 auto; padding-block: 28px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 28px; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; line-height: 1.15; }
+h1 { font-size: clamp(28px, 4vw, 40px); font-weight: 800; }
+h2 { font-size: 22px; }
+h3 { font-size: 18px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+p { margin: 0; max-width: 72ch; }
+.eyebrow { font: 600 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--deploy); }
+header { display: grid; gap: 10px; }
+.lede { color: var(--muted); }
+.stats { display: flex; flex-wrap: wrap; gap: 12px 36px; font-family: var(--mono); }
+.stats b { display: block; font: 800 28px var(--display); color: var(--fg); }
+.stats span { color: var(--muted); font-size: 13px; }
+.tablewrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; vertical-align: top; }
+td.wrap { white-space: normal; min-width: 260px; font-size: 13px; color: var(--muted); }
+th { font: 600 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+tr:last-child td { border-bottom: 0; }
+a { color: inherit; text-decoration-color: var(--muted); text-underline-offset: 2px; }
+a:focus-visible { outline: 2px solid var(--deploy); outline-offset: 2px; }
+.pill { font: 600 11px var(--mono); letter-spacing: .05em; text-transform: uppercase; padding: 2px 8px; border-radius: 99px;
+  border: 1px solid currentColor; }
+.pill.ok { color: var(--ok); } .pill.bad { color: var(--deploy); } .pill.warn { color: var(--warn); }
+.summary { display: grid; gap: 10px; }
+.summary ul { margin: 0; padding-left: 20px; max-width: 76ch; display: grid; gap: 6px; }
+.clips { display: grid; gap: 40px; }
+.clip { display: grid; gap: 12px; min-width: 0; }
+video { width: 100%; max-width: 100%; background: #000; border-radius: 4px; }
+dl { margin: 0; display: grid; gap: 6px; }
+dl div { display: grid; grid-template-columns: 200px 1fr; gap: 12px; }
+dt { color: var(--muted); font-size: 14px; } dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 640px) { dl div { grid-template-columns: 1fr; gap: 0; } }
+.method { color: var(--muted); font-size: 14px; display: grid; gap: 8px; }
+.method p { max-width: 90ch; }
+</style>
+<main>
+<header>
+  <div class="eyebrow">Sauron hackathon · Oct 24 2026</div>
+  <h1>Sauron watching real crime footage</h1>
+  <p class="lede">Real CCTV of real crimes, run through the same models and drone-launch policy the edge units run. Every box, score and decision in these videos comes from our models. Nothing is hand-placed or edited.</p>
+  <div class="stats">
+    <div><b>{{CAUGHT}}</b><span>crimes → drone deployed</span></div>
+    <div><b>{{FP}}</b><span>benign clips with a false deploy</span></div>
+    <div><b>{{COST}}</b><span>Jev cost for all clips</span></div>
+  </div>
+</header>
+
+<section class="summary">
+  <h2>What happened</h2>
+  {{SUMMARY}}
+</section>
+
+<section>
+  <h2 style="margin-bottom:12px">Results</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Clip</th><th>Label</th><th>Crime window</th><th>Deploy at</th><th>From crime start</th><th>Result</th><th>Top verdict</th><th>False deploys</th><th>Police</th></tr></thead>
+    <tbody>
+{{ROWS}}
+    </tbody>
+  </table></div>
+</section>
+
+<section class="clips">
+{{CARDS}}
+</section>
+
+<section class="method">
+  <h2>How these were made</h2>
+  <p><b>Decisions.</b> The netra-ask dispatch watcher from main, in replay mode, with nothing posted anywhere. The person gate (YOLO11s, 1280 px, full frame plus 2×2 tiles) opens the judge. Every 2 s Jev scores a 4-frame strip for break-in, theft, tampering, trespass, vandalism, weapon, violence, menace and normal, and gives one subject box. The default policy turns that into evidence E and a verdict: none, watch, deploy or urgent. This is the same policy the jetson-cloud edge units run (judge.py is byte-identical, with no policy override). The first deploy or urgent strip is the drone launch. The subject is Jev's box snapped to a tracked YOLO person, and the caption is Jev's.</p>
+  <p><b>Cleaned sources.</b> News graphics, app overlays, editor marks and camera cuts were cropped or trimmed from each source before any model ran (crimevid/prep.sh), so YOLO and Jev only see camera pixels. Each clip notes what was removed.</p>
+  <p><b>Video overlay.</b> Cyan boxes are YOLO11s COCO person detections with ByteTrack ids, on every rendered frame at 12 fps. They are for display. Blue POLICE boxes are tracks Jev marked as a uniformed police officer or security guard (p ≥ 0.5). Jev is asked about each track's crop, and asked again when a clearly larger crop comes along. Police are never picked as the suspect. The red SUSPECT box is the incident's tracked subject. If that box lands on an officer, it moves to the last suspect or the nearest civilian. The HUD shows the newest strip's facts, E and verdict at the frame where that strip was taken. In a replay the judge runs in step with the video. Live, each strip adds Jev's round trip, about 0.3 s per strip according to the watcher's notes.</p>
+  <p><b>Crime windows</b> come from our human labels of each clip (event-labels.json). "From crime start" is the deploy time minus the start of that window. The clips are public YouTube CCTV uploads (news and police releases) plus MEVA outdoor CCTV for the benign clips. Code: Netra-Internal/sauron-hackathon, branch hack-crimevid, folder crimevid/.</p>
+</section>
+</main>
