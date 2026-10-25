@@ -20,4 +20,4 @@ Clips: `~/sauron-data/dispatch-clips/yt/` (YouTube CCTV; sources in page.py `SRC
     ./crimevid/prep.sh && ./crimevid/run.sh
     python3 crimevid/page.py ~/sauron-data/crimevid/out /tmp/page      # then publish /tmp/page/index.html + v/*.mp4
 
-Nothing is deployed and no units or nginx changes were made. The pipeline only reads from jetson-cloud (to verify the policy matches).
+Nothing is deployed and no units or nginx changes were made. The policy match was checked read-only against the edge host (`<edge-host>`); nothing here connects to a host.
