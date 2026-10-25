@@ -10,7 +10,6 @@ const h = html => { const t = document.createElement("template"); t.innerHTML = 
 const toast = msg => { const t = h(`<div class="toast">${esc(msg)}</div>`); $("#toasts").append(t); setTimeout(() => t.remove(), 6000); };
 const fx = (v, d = 1) => v == null ? "–" : Number(v).toFixed(d);
 const ll = (lat, lon) => `${Number(lat).toFixed(6)}, ${Number(lon).toFixed(6)}`;
-const cap1 = s => s ? s[0].toUpperCase() + s.slice(1) : s;
 const ago = iso => {
   if (!iso) return "";
   const s = Math.round((Date.now() - new Date(iso)) / 1e3);
@@ -33,8 +32,7 @@ const rawTns = text => text.match(/"t_ns"\s*:\s*(\d+)/)?.[1];
 const S = {
   cams: null, camErr: null, cam: null,            // camera list, its error, the open camera id
   gen: 0, live: null, liveErr: null, liveAt: 0,   // live loop generation, the payload on screen, its error
-  inc: new Map(), incErr: null, incLoaded: false, sel: null,
-  msgs: [], msgSince: 0, msgErr: null,
+  inc: new Map(), incErr: null,
   pending: new Map(),                             // track_uuid -> {state: "confirm"|"sending", box, t_ns}
   sentByTrack: new Map(),                         // track_uuid -> incident id (launched from this page)
   chips: new Map(),                               // track_uuid -> chip element
@@ -307,7 +305,7 @@ function chipHTML(b, k, stale) {
   const op = /operator/i.test(`${L?.why_label || ""} ${L?.why || ""}`);
   const why = L && !op ? `<div class="why">${facts ? `${esc(facts)} · ` : ""}scene facts · Jev pointed at this person${L.caption ? `<br>${esc(L.caption)}` : ""}</div>` : "";
   let acts;
-  if (inc) acts = `<span class="sentlbl">drone sent</span><button class="no open" data-inc="${esc(inc.id)}">Incident</button>`;
+  if (inc) acts = `<span class="sentlbl">drone sent</span>`;
   else if (p?.state === "confirm") acts = `<span>Send drone to ${esc(id)}?</span><button class="yes">Yes</button><button class="no">Cancel</button>`;
   else if (p?.state === "sending") acts = `<span>Sending…</span>`;
   else acts = `<button class="send">Send drone</button>`;
@@ -320,9 +318,8 @@ function placeChip(b, t_ns, k, X, top, bottom, w, stale) {
   if (el.dataset.html !== html) {               // re-render only on change, so a click in flight isn't destroyed
     el.dataset.html = html; el.innerHTML = html;
     el.querySelector(".send")?.addEventListener("click", () => { S.pending.set(tu, { state: "confirm", box: b, t_ns }); drawBoxes(); });
-    el.querySelector(".no:not(.open)")?.addEventListener("click", () => { S.pending.delete(tu); drawBoxes(); });
+    el.querySelector(".no")?.addEventListener("click", () => { S.pending.delete(tu); drawBoxes(); });
     el.querySelector(".yes")?.addEventListener("click", () => launch(tu));
-    el.querySelector(".open")?.addEventListener("click", e => selectInc(e.target.dataset.inc));
   }
   el.className = `pchip ${k}`;
   const flip = top < 64;                        // too close to the top: put the chip under the box
@@ -343,116 +340,36 @@ async function launch(tu) {
     toast(r.already_dispatched ? `Already dispatched: ${shortId(tu)} is on incident ${r.id}`
       : `Drone sent to ${shortId(tu)} · ${r.located ? `located (${r.loc_source || "?"}) ${ll(r.lat, r.lon)}` : "not located"}`);
     await pollIncidents();
-    selectInc(r.id);
   } catch (err) { if (err.status !== 401) toast(`Couldn't send the drone: ${err.message}`); }
   S.pending.delete(tu); drawBoxes();
 }
 window.addEventListener("resize", drawBoxes);
 
-// ------------------------------------------------------------------ incidents + drone messages (left)
+// ------------------------------------------------------------------ drone out (one compact card per open incident, over the video)
 async function pollIncidents() {
   try {
     const r = await api("/incidents");
     const rows = Array.isArray(r) ? r : r.incidents || [];
-    S.inc = new Map(rows.map(x => [x.id, x])); S.incErr = null; S.incLoaded = true;
+    S.inc = new Map(rows.map(x => [x.id, x])); S.incErr = null;
   } catch (err) { if (err.status !== 401) S.incErr = err.status === 404 ? "The launch API (hackdash.launch) isn't deployed yet." : `Couldn't load incidents: ${err.message}`; }
-  renderPane(); renderTop(); drawBoxes();
+  renderDrones(); renderTop(); drawBoxes();
 }
-async function pollMsgs() {
-  try {
-    const r = await api(`/drone/messages?since=${S.msgSince}`);
-    const rows = Array.isArray(r) ? r : r.messages || [];
-    for (const m of rows) { S.msgs.push(m); if (m.seq != null) S.msgSince = Math.max(S.msgSince, m.seq); }
-    S.msgs = S.msgs.slice(-300); S.msgErr = null;
-    if (rows.length) renderPane();
-  } catch (err) { if (err.status !== 401) { S.msgErr = err.status === 404 ? "droplink isn't deployed yet." : err.message; renderPane(); } }
-}
-const incs = () => [...S.inc.values()].sort((a, b) => ((b.status !== "closed") - (a.status !== "closed")) || ((b.opened_at || "") > (a.opened_at || "") ? 1 : -1));
-const msgsFor = id => S.msgs.filter(m => m.incident_id === id || m.body?.incident?.id === id);
-// forwarded = {attempts, delivered, last: {at, status|error, seq, ...}} (netra-ask's webhook delivery state)
-function lastFwd(x) { const f = x.forwarded?.last; return f ? (f.status || f.error || "?") : null; }
-const ev = (x, f) => x.evidence?.[f] || x.evidence?.[`${f.split(".")[0]}_url`];
-function selectInc(id) { S.sel = id; renderPane(); }
-function renderPane() {
-  const pane = $("#pane"), keep = pane.scrollTop;
-  pane.innerHTML = "";
-  const x = S.sel && S.inc.get(S.sel);
-  if (x) renderDetail(pane, x);
-  else renderList(pane);
-  pane.scrollTop = keep;
-}
-function renderList(pane) {
-  const all = incs(), open = all.filter(x => x.status !== "closed");
-  pane.append(h(`<div class="qhead"><h2>Drones sent</h2><span class="count ${open.length ? "" : "zero"}">${open.length}</span></div>`));
-  if (S.incErr) pane.append(h(`<div class="allquiet"><div class="aq-icon warn">!</div><div class="muted small">${esc(S.incErr)}</div></div>`));
-  else if (!S.incLoaded) pane.append(h(`<div class="muted small">Loading…</div>`));
-  else if (!all.length) pane.append(h(`<div class="allquiet"><div class="aq-icon">✓</div><div><b>No drone sent</b><div class="muted small">
-    Open a camera and press <b>Send drone</b> on a person's box. Incidents launched from here show up here.</div></div></div>`));
-  for (const x of all) {
-    const f = lastFwd(x), closed = x.status === "closed";
-    const b = h(`<button class="qitem ${closed ? "" : "open"}">${ev(x, "crop.jpg") ? `<img class="qthumb" src="${esc(ev(x, "crop.jpg"))}" alt="">` : `<div class="qthumb">${closed ? "✓" : "✈"}</div>`}<div class="qbody">
-      <div class="qt">${esc(cap1(x.why_label || String(x.why || "operator launch").replace(/_/g, " ")))}</div>
-      <div class="qm">${x.edge_track ? `${esc(shortId(x.edge_track))} · ` : ""}${esc(camOf(x.camera_id)?.name || x.camera_id || "")} · ${esc(ago(x.opened_at))}${closed && x.close_reason ? ` · ${esc(x.close_reason)}` : ""}</div>
-      <div class="qchips"><span class="chip ${closed ? "" : "red"}">${closed ? "Closed" : "Open"}</span>
-        ${x.located ? `<span class="chip">Located${x.radius_m != null ? ` ±${fx(x.radius_m, 0)} m` : ""}</span>` : `<span class="chip muted">Not located</span>`}
-        ${f != null ? `<span class="chip ${/^2/.test(String(f)) ? "green" : "amber"}">forwarded ${esc(x.forwarded.delivered ?? "?")}/${esc(x.forwarded.attempts ?? "?")} · ${esc(f)}</span>` : `<span class="chip muted">not forwarded</span>`}
-        ${msgsFor(x.id).length ? `<span class="chip green">drone got ${msgsFor(x.id).length}</span>` : ""}</div></div></button>`);
-    b.onclick = () => selectInc(x.id);
-    pane.append(b);
-  }
-  renderLink(pane, S.msgs.slice(-8).reverse(), "Drone link (droplink): last messages");
-}
-function fact(k, v) { return v == null || v === "" ? "" : `<div class="fk">${esc(k)}</div><div class="fv">${v}</div>`; }
-const when = iso => iso ? `${esc(new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }))} <span class="muted">(${esc(ago(iso))})</span>` : null;
-function renderDetail(pane, x) {
-  pane.append(btn("← Drones sent", "ghost back", () => selectInc(null)));
-  const closed = x.status === "closed";
-  pane.append(h(`<div class="dhead"><div class="row"><span class="chip ${closed ? "" : "red"}">${closed ? "Closed" : "Open"}</span>
-    <span class="muted small">${esc(x.mode || "")} · ${esc(x.verdict || "")}</span></div><h2>${esc(cap1(x.why_label || String(x.why || "operator launch").replace(/_/g, " ")))}</h2></div>`));
-  const F = x.forwarded, L = F?.last;
-  const fwd = L ? `${esc(F.delivered ?? "?")} of ${esc(F.attempts ?? "?")} delivered · last ${esc(L.status || L.error || "?")} ${esc(ago(L.at))}${L.netloc ? ` <span class="muted">to ${esc(L.netloc)}</span>` : ""}` : "";
-  const cmds = (x.commands || []).map(c => `${esc(c.command)} <span class="muted">${esc(c.delivery_status || "")} · ${esc(ago(c.issued_at))}${c.reason?.code ? ` · ${esc(c.reason.code)}` : ""}</span>`).join("<br>");
-  const loc = x.located ? `${ll(x.lat, x.lon)}${x.radius_m != null ? ` <span class="muted">±${fx(x.radius_m, 1)} m</span>` : ""}${x.loc_source ? ` <span class="muted">· ${esc(x.loc_source)}</span>` : ""}` : `<span class="muted">Not located</span>`;
-  const mine = x.edge_track || [...S.sentByTrack].find(([, id]) => id === x.id)?.[0];
-  if (ev(x, "frame.jpg")) pane.append(h(`<a class="media" href="${esc(ev(x, "frame.jpg"))}" target="_blank"><img src="${esc(ev(x, "frame.jpg"))}" alt="Frame at the click, person boxed"></a>`));
-  pane.append(h(`<div class="facts">${fact("Incident", `<span class="mono small">${esc(x.id)}</span>`)}${fact("Camera", esc(camOf(x.camera_id)?.name || x.camera_id))}
-    ${fact("Person", mine ? esc(shortId(mine)) : null)}${fact("Site track", x.site_track_id ? `<span class="mono small">${esc(x.site_track_id)}</span>` : null)}
-    ${fact("State", esc(x.status || "?") + (x.close_reason || x.closed_reason ? ` <span class="muted">· ${esc(x.close_reason || x.closed_reason)}</span>` : ""))}
-    ${fact("Opened", when(x.opened_at))}${fact("Updated", when(x.updated_at))}${fact("Closed", when(x.closed_at))}
-    ${fact("Location", loc)}${fact("Operator", x.operator ? esc(x.operator) : null)}${fact("Aborted by", x.aborted_by ? esc(x.aborted_by) : null)}
-    ${fact("Forwarded", fwd || `<span class="muted">nothing sent yet</span>`)}${fact("Commands", cmds || null)}
-    ${fact("Delivered", msgsFor(x.id).length ? `${msgsFor(x.id).length} message${msgsFor(x.id).length === 1 ? "" : "s"} at the drone receiver` : `<span class="muted">nothing received yet</span>`)}</div>`));
-  const row = h(`<div class="row"></div>`);
-  if (!closed) {
+function renderDrones() {
+  const box = $("#droneout"), open = [...S.inc.values()].filter(x => x.status !== "closed");
+  const key = open.map(x => `${x.id}|${x.edge_track}|${x.located}|${x.radius_m}`).join();
+  if (box.dataset.key === key) return;            // unchanged: keep the button (and a click in flight)
+  box.dataset.key = key; box.innerHTML = "";
+  for (const x of open) {
+    const who = x.edge_track || [...S.sentByTrack].find(([, id]) => id === x.id)?.[0];
+    const at = x.opened_at ? new Date(x.opened_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+    const card = h(`<div class="dcard"><span><b>Drone sent</b> → ${who ? esc(shortId(who)) : "person"} · ${x.located ? `located${x.radius_m != null ? ` ±${fx(x.radius_m, 0)} m` : ""}` : "not located"}${at ? ` · ${esc(at)}` : ""}</span></div>`);
     const ab = btn("Abort drone", "dangerfill", async () => {
       ab.disabled = true;
       try { const r = await post(`/incidents/${encodeURIComponent(x.id)}/abort`); toast(`Abort sent${r?.command_id ? `: command ${r.command_id}` : ""}`); await pollIncidents(); }
       catch (err) { if (err.status !== 401) toast(`Couldn't abort: ${err.message}`); ab.disabled = false; }
     });
-    row.append(ab);
+    card.append(ab); box.append(card);
   }
-  pane.append(row);
-  renderLink(pane, msgsFor(x.id).slice().reverse(), "What the drone received");
-}
-function renderLink(pane, rows, title) {
-  pane.append(h(`<div class="label"><span>${esc(title)}</span><span>${S.msgErr ? "" : rows.length}</span></div>`));
-  if (S.msgErr) { pane.append(h(`<div class="muted small">${esc(S.msgErr)}</div>`)); return; }
-  if (!rows.length) { pane.append(h(`<div class="muted small">No messages yet.</div>`)); return; }
-  const box = h(`<div class="msgs"></div>`);
-  for (const m of rows) {
-    const b = m.body || {}, I = b.incident, C = b.command;
-    // one line of what the drone would act on; the whole signed body folded underneath
-    const what = I ? `${I.status} · ${I.verdict}${I.located ? ` · ${ll(I.lat, I.lon)} ±${fx(I.radius_m, 0)} m` : " · not located"}`
-      : C ? `${typeof C === "string" ? C : C.command || JSON.stringify(C)}${b.reason?.code ? ` · ${b.reason.code}` : ""}`
-      : b.position ? `position ${ll(b.position.lat, b.position.lon)}` : "";
-    const body = JSON.stringify(b, null, 1);
-    box.append(h(`<div class="msg"><div class="row"><span class="mt">${esc(m.type || "?")}</span>
-      <span class="chip ${m.verified ? "green" : "red"}">${m.verified ? "signature ok" : "unverified"}</span>
-      <span class="muted">${esc(ago(m.received_at))}${m.seq != null ? ` · seq ${esc(m.seq)}` : ""}</span></div>
-      ${what ? `<div>${esc(what)}</div>` : ""}${m.incident_id ? `<div class="muted mono small">${esc(m.incident_id)}</div>` : ""}
-      <details><summary class="muted small">signed body</summary><pre>${esc(body.slice(0, 4000))}</pre></details></div>`));
-  }
-  pane.append(box);
 }
 
 // ------------------------------------------------------------------ top bar
@@ -475,8 +392,8 @@ function renderTop() {
 }
 function tickClock() { $("#clock").textContent = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }); }
 
-document.addEventListener("keydown", e => { if (e.key === "Escape") { if (S.pending.size) { S.pending.clear(); drawBoxes(); } else if (S.sel) selectInc(null); } });
-renderPane(); renderWall(); renderStage(); tickClock();
-pollCams(); pollIncidents(); pollMsgs();
-setInterval(pollCams, 5000); setInterval(pollIncidents, 2000); setInterval(pollMsgs, 2000); setInterval(tickClock, 1000);
+document.addEventListener("keydown", e => { if (e.key === "Escape") { if (S.pending.size) { S.pending.clear(); drawBoxes(); } } });
+renderWall(); renderStage(); tickClock();
+pollCams(); pollIncidents();
+setInterval(pollCams, 5000); setInterval(pollIncidents, 2000); setInterval(tickClock, 1000);
 setInterval(() => { if (S.liveErr) renderStage(); }, 1000);
