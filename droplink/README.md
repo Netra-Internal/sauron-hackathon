@@ -32,4 +32,4 @@
   - It is used only by the tests. It can never move the PTZ (see `ptzd/README.md`).
 - netra-internal branch `hack-launch-next-ok` (71d5695) adds `/hack` to `NEXT_OK` in `common/auth.py`, so login can redirect back to /hack/. It is deployed: auth.py was copied and netra-map restarted.
 
-Install / update: `bash droplink/install.sh` (HOST defaults to the droplet).
+Install / update: `HACK_HOST=root@<droplet> bash droplink/install.sh` (HACK_HOST is exported in ~/.bashrc).

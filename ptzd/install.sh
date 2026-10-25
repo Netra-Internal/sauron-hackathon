@@ -9,7 +9,7 @@
 # The token is created once on the droplet (/etc/ptzd-token, root:netra 640; hackdash/ptz.py reads it).
 set -euo pipefail
 BOX=$1; MODE=$2; FWD=${3:-}
-DROPLET=${DROPLET:?set DROPLET=root@<droplet>}
+DROPLET=${DROPLET:-${HACK_HOST:?set HACK_HOST=root@<droplet>}}
 DROPLET_HOST=${DROPLET#*@}
 CAMENV=${CAMENV:-$HOME/.config/netra/axis-q6215.env}
 cd "$(dirname "$0")"

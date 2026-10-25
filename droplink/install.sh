@@ -3,7 +3,7 @@
 # Copies droplink.py + the unit, writes /etc/droplink.env with ONLY the webhook secret (taken from /etc/netra-ask.env),
 # restarts droplink.service and checks /health. Never touches netra-ask.
 set -euo pipefail
-HOST=${HOST:?set HOST=root@<droplet>}
+HOST=${HOST:-${HACK_HOST:?set HACK_HOST=root@<droplet>}}
 cd "$(dirname "$0")"
 ssh "$HOST" 'mkdir -p /opt/netra/droplink'
 scp -q droplink.py "$HOST":/opt/netra/droplink/droplink.py

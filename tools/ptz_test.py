@@ -1,4 +1,4 @@
-"""Real-camera PTZ test through https://internal.netralabs.net/hack/api (basic auth, ~/.config/netra/hack-launch.env).
+"""Real-camera PTZ test through $HACK_API (https://<internal host>/hack/api) (basic auth, ~/.config/netra/hack-launch.env).
 Saves the current pose as Home, holds pan / tilt / zoom, lets the deadman stop a move, centres on a click, goes Home, and
 prints the measured latency of every command. HACK_LAUNCH_USER=.. HACK_LAUNCH_PASSWORD=.. python3 ptz_test.py [cam]"""
 import base64
@@ -13,7 +13,7 @@ import sys
 import time
 import urllib.request
 
-API = os.environ.get("HACK_API", "https://internal.netralabs.net/hack/api")
+API = os.environ["HACK_API"]
 CAM = sys.argv[1] if len(sys.argv) > 1 else "axis-q6215"
 AUTH = "Basic " + base64.b64encode(f"{os.environ['HACK_LAUNCH_USER']}:{os.environ['HACK_LAUNCH_PASSWORD']}".encode()).decode()
 LAT: dict[str, list] = {}
