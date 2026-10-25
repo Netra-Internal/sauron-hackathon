@@ -1,0 +1,13 @@
+[Unit]
+Description=ptzd: manual PTZ for the Axis (sauron-hackathon), 127.0.0.1:8530
+After=network-online.target
+
+[Service]
+DynamicUser=yes
+EnvironmentFile=/etc/ptzd.env
+ExecStart=/usr/bin/python3 -I /opt/netra/ptzd/ptzd.py --listen 127.0.0.1:8530
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

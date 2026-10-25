@@ -1,0 +1,12 @@
+[Unit]
+Description=ptzd tunnel: droplet 127.0.0.1:8530 -> netra@100.102.178.107 ptzd
+After=network-online.target
+
+[Service]
+Restart=always
+RestartSec=5
+Environment=HOME=/root
+ExecStart=/usr/bin/ssh -N -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=accept-new -L 127.0.0.1:8530:127.0.0.1:8530 netra@100.102.178.107
+
+[Install]
+WantedBy=multi-user.target
