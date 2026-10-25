@@ -10,6 +10,38 @@ managed from tmux, on top of Netra's existing stack (netra-ask, the Jetson edge,
 
 ## What it does
 
+```mermaid
+flowchart LR
+  subgraph site["Site"]
+    CAM["Cameras<br/>Axis Q6215-LE PTZ · webcams · any RTSP"]
+    J["Jetson<br/>capture + stream only"]
+    CAM --> J
+  end
+  subgraph pod["RunPod GPU pod · RTX A5000"]
+    MTX["mediamtx<br/>live video"]
+    EDGE["Person detection + tracking<br/>YOLO11s"]
+    JEV["Sauron judge · Jev<br/>4-frame strip every 2 s → facts<br/>→ policy → verdict + suspect"]
+    MTX --> EDGE --> JEV
+  end
+  subgraph droplet["Droplet · internal.netralabs.net"]
+    RELAY["/hack/relay<br/>instant ack, ordered forward"]
+    ASK["netra-ask<br/>sitefuse: person → lat/lon ± m<br/>dispatch incidents"]
+    HACK["/hack/ operator page<br/>live video · boxes · suspicion<br/>Send drone · Abort · PTZ · Calibrate"]
+    RELAY --> ASK
+    ASK --> HACK
+  end
+  DL["droplink<br/>signed drone receiver"]
+  J -- "video (RTSP push)" --> MTX
+  EDGE -- "1 s box buckets" --> RELAY
+  JEV -- "verdicts" --> ASK
+  MTX -- "LL-HLS stream" --> HACK
+  HACK -- "Send drone" --> ASK
+  ASK -- "HMAC-signed launch, 1 Hz positions, end/abort" --> DL
+  HACK -. "PTZ commands (ptzd)" .-> CAM
+```
+
+Text version:
+
 ```
 camera (Axis Q6215-LE PTZ, webcams, any RTSP)
    │  video only — the box next to the camera just captures and streams
