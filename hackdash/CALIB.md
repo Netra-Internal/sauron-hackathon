@@ -22,6 +22,7 @@ It writes nothing of its own to the DB except pan/tilt/zoom on save.
   - `pytest tests/test_calib.py` (needs a netra-ask checkout).
   - `tools/calib_roundtrip.py` is an API round trip on a throwaway site.
   - `tools/calib_shots.js` and `tools/calib_sitesetup_check.js` are Playwright checks: production is read-only and edits go to a throwaway site.
-  - The tests take their credentials from `~/.config/netra/hack-launch.env`; see `tools/hack-launch.env.example`.
+  - The tools need `HACK_BASE=https://<host>` and take their credentials from `~/.config/netra/hack-launch.env`; see `tools/hack-launch.env.example`.
+  - Deploy with `HACK_HOST=root@<droplet> deploy/install.sh`.
   - None of them sends a PTZ command.
 - **Screenshots:** `plans/calib-*.png`.

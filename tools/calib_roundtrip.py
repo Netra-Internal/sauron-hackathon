@@ -13,7 +13,7 @@ from base64 import b64encode
 from pathlib import Path
 
 ENV = dict(l.split("=", 1) for l in Path.home().joinpath(".config/netra/hack-launch.env").read_text().split() if "=" in l)
-B = os.environ.get("HACK_URL", "https://internal.netralabs.net/hack/api")
+B = os.environ["HACK_BASE"].rstrip("/") + "/hack/api"   # HACK_BASE=https://<host>
 AUTH = "Basic " + b64encode(f"{ENV['HACK_LAUNCH_USER']}:{ENV['HACK_LAUNCH_PASSWORD']}".encode()).decode()
 PROD_SITE, PROD_CAM, FEED = "ucsd-design-innovation-building-c1dd", "camera-1-5621", "jetson-c920"
 

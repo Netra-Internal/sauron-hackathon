@@ -3,12 +3,13 @@
 // A: production site + camera-1-5621, READ ONLY (no Save pressed). B: a THROWAWAY site + still-only camera made through
 // the UI: freeze a real jetson-c920 frame, click 7 frame/map pairs (the production pairs' pixels/points, re-clicked),
 // see the draft fit, Save, check netra-ask holds it, then delete camera + site.
-// Credentials (~/.config/netra/hack-launch.env) are added only to requests for internal.netralabs.net.
+// Credentials (~/.config/netra/hack-launch.env) are added only to requests for HACK_BASE's host.
 const { chromium } = require("playwright-core");
 const fs = require("fs"), os = require("os"), path = require("path");
 const ENV = Object.fromEntries(fs.readFileSync(path.join(os.homedir(), ".config/netra/hack-launch.env"), "utf8").split(/\s+/).filter(l => l.includes("=")).map(l => l.split(/=(.*)/s).slice(0, 2)));
+const BASE = process.env.HACK_BASE || (() => { throw new Error("set HACK_BASE=https://<host>"); })();
+const HOSTNAME = new URL(BASE).hostname;
 const AUTH = "Basic " + Buffer.from(`${ENV.HACK_LAUNCH_USER}:${ENV.HACK_LAUNCH_PASSWORD}`).toString("base64");
-const BASE = "https://internal.netralabs.net";
 const OUT = path.join(__dirname, "..", "plans");
 const PROD_SITE = "ucsd-design-innovation-building-c1dd";
 const log = (...a) => console.log(...a);
@@ -16,7 +17,7 @@ const log = (...a) => console.log(...a);
 (async () => {
   const browser = await chromium.launch({ executablePath: process.env.CHROME || undefined });
   const ctx = await browser.newContext({ viewport: { width: 1680, height: 960 }, colorScheme: "dark" });
-  await ctx.route(u => u.hostname === "internal.netralabs.net", r => r.continue({ headers: { ...r.request().headers(), authorization: AUTH } }));
+  await ctx.route(u => u.hostname === HOSTNAME, r => r.continue({ headers: { ...r.request().headers(), authorization: AUTH } }));
   const page = await ctx.newPage();
   page.on("dialog", d => { log("dialog:", d.message().slice(0, 120)); d.accept(d.type() === "prompt" ? "calib screenshot test (delete me)" : undefined); });
   page.on("pageerror", e => log("PAGE ERROR", e.message));
