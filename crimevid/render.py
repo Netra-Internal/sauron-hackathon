@@ -19,6 +19,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 FPS = 12
+POLICE_P = 0.5                               # police.py answer at or above this = police officer
 VH, HUD_W, TL_H = 540, 400, 110
 WALL0 = 1_800_000_000                        # run_demo.py replays at wall = WALL0 + stream time
 FACTS = ["break_in", "theft", "tampering", "trespass", "vandalism", "weapon", "violence", "menace", "normal"]
@@ -109,6 +110,20 @@ def render(d: Path, weights: str):
     subj = [(stream_t(p["at"]), p["box"]) for p in (inc or {}).get("track", [])]
     inc_t0 = stream_t(inc["opened_at"]) if inc else None
     inc_t1 = stream_t(inc["closed_at"]) if inc and inc.get("closed_at") else dur
+    # police per render track (police.py: Jev on the person crop); only answers asked at or before t are used
+    pj = json.loads((d / "police.json").read_text())["tracks"] if (d / "police.json").exists() else {}
+
+    def cop(tid, t):
+        """(police p, armed p) from the newest Jev answer for this track asked by time t, else (None, None)."""
+        a = [r for r in pj.get(str(tid), []) if r["t"] <= t + 1e-6]
+        return (a[-1]["police"], a[-1]["armed"]) if a else (None, None)
+
+    def is_cop(tid, t):
+        return (cop(tid, t)[0] or 0.0) >= POLICE_P
+
+    summ = {"police_tracks": sorted(int(k) for k, v in pj.items() if any((r["police"] or 0) >= POLICE_P for r in v)),
+            "police_first_t": None, "police_in_view_at_deploy": False, "subject_resnapped_s": 0.0, "no_suspect_s": 0.0}
+    last_sid = None
     emax = pol["urgent_e"] * 1.4                  # E bar/plot scale; E above it pins to the top
     dep_id = None
     enc = subprocess.Popen(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
@@ -123,31 +138,51 @@ def render(d: Path, weights: str):
         img.paste(Image.fromarray(fr).resize((vw, VH), Image.BILINEAR), (0, 0))
         g = ImageDraw.Draw(img)
         # subject: newest record track point at or before t, while the incident is open
-        sbox, sid = None, None
+        sbox, sid, no_suspect = None, None, False
+        cops = {p[0] for p in people if is_cop(p[0], t)}
+        if cops and summ["police_first_t"] is None:
+            summ["police_first_t"] = round(t, 2)
         if inc and subj and subj[0][0] <= t + 1e-6 and t <= inc_t1:
             sbox = [b for (ts, b) in subj if ts <= t + 1e-6][-1]
             best = max(people, key=lambda p: iou(p[1:5], sbox), default=None)
             if best is not None and iou(best[1:5], sbox) >= 0.2:
                 sid = best[0]
+            on_cop = sid in cops or (sid is None and any(iou(p[1:5], sbox) >= 0.2 for p in people if p[0] in cops))
+            if on_cop:                                # never a police officer: keep the last suspect, else the nearest civilian
+                civ = [p for p in people if p[0] not in cops]
+                if any(p[0] == last_sid for p in civ):
+                    sid = last_sid
+                elif civ:
+                    cx, cy = (sbox[0] + sbox[2]) / 2, (sbox[1] + sbox[3]) / 2
+                    sid = min(civ, key=lambda p: ((p[1] + p[3]) / 2 - cx) ** 2 + ((p[2] + p[4]) / 2 - cy) ** 2)[0]
+                else:
+                    sid, no_suspect = None, True
+                summ["subject_resnapped_s"] += 1 / FPS
+                if no_suspect:
+                    summ["no_suspect_s"] += 1 / FPS
+            if sid is not None:
+                last_sid = sid
         for p in people:
             x1, y1, x2, y2 = [v * s for v in p[1:5]]
-            is_s = p[0] == sid
-            col = (255, 40, 40) if is_s else (60, 220, 255)
-            g.rectangle([x1, y1, x2, y2], outline=col, width=4 if is_s else 2)
-            lab = f"SUBJECT #{p[0]}" if is_s else f"person #{p[0]} {p[5]:.2f}"
+            is_s, is_p = p[0] == sid, p[0] in cops
+            col = (255, 40, 40) if is_s else (40, 110, 255) if is_p else (60, 220, 255)
+            g.rectangle([x1, y1, x2, y2], outline=col, width=4 if is_s or is_p else 2)
+            lab = (f"SUSPECT #{p[0]}" if is_s else f"POLICE #{p[0]} {cop(p[0], t)[0]:.2f}" if is_p
+                   else f"person #{p[0]} {p[5]:.2f}")
             tw = g.textlength(lab, font=fb[12])
             g.rectangle([x1, y1 - 17, x1 + tw + 8, y1], fill=col)
-            g.text((x1 + 4, y1 - 16), lab, font=fb[12], fill=(0, 0, 0))
-        if sbox is not None and sid is None:             # subject box from the pipeline with no matching render track
+            g.text((x1 + 4, y1 - 16), lab, font=fb[12], fill=(255, 255, 255) if is_p else (0, 0, 0))
+        if sbox is not None and sid is None and not no_suspect and not any(iou(p[1:5], sbox) >= 0.2 for p in people):             # subject box from the pipeline with no matching render track
             x1, y1, x2, y2 = [v * s for v in sbox]
             g.rectangle([x1, y1, x2, y2], outline=(255, 40, 40), width=3)
             g.rectangle([x1, y1 - 17, x1 + 70, y1], fill=(255, 40, 40))
-            g.text((x1 + 4, y1 - 16), "SUBJECT", font=fb[12], fill=(0, 0, 0))
+            g.text((x1 + 4, y1 - 16), "SUSPECT", font=fb[12], fill=(0, 0, 0))
         # deploy banner: 3 s big, then a persistent tag
         if dep is not None and t >= dep:
             if dep_id is None:
-                dep_id = sid
-            who = f"subject #{dep_id}" if dep_id is not None else "subject"
+                dep_id = sid if sid is not None else (-1 if no_suspect else None)
+                summ["police_in_view_at_deploy"] = bool(cops)
+            who = f"suspect #{dep_id}" if dep_id not in (None, -1) else "no suspect in view" if dep_id == -1 else "suspect"
             if t < dep + 3.0:
                 txt = f"SAURON: DEPLOY DRONE → {who}"
                 tw = g.textlength(txt, font=fb[26])
@@ -182,17 +217,28 @@ def render(d: Path, weights: str):
         g.text((x0, 180), "Jev facts (newest 4-frame strip, every 2 s)", font=fb[12], fill=(200, 200, 210))
         for i, name in enumerate(FACTS):
             y = 200 + i * 19
-            p = cur["facts"][name] if cur else 0.0
+            p = (cur["facts"].get(name) or 0.0) if cur else 0.0
             g.text((x0, y), name.replace("_", "-"), font=f[13], fill=(220, 220, 225))
             col = (90, 170, 90) if name == "normal" else ((230, 70, 50) if p >= pol["danger_p"] else (170, 120, 60))
             bar(g, x0 + 92, y + 3, bw - 140, 11, p, col)
             g.text((CW - 44, y), f"{p:.2f}", font=f[13], fill=(220, 220, 225))
-        y = 200 + len(FACTS) * 19 + 8
+        y = 200 + len(FACTS) * 19 + 4
+        if cur and cops and (cur["facts"].get("weapon") or 0.0) >= 0.3:
+            armed = [(c, cop(c, t)[1] or 0.0) for c in sorted(cops)]
+            sa = cop(sid, t)[1] if sid is not None else None
+            note = "weapon: police officer " + ", ".join(f"#{c} (armed {a:.2f})" for c, a in armed[:2])
+            if sa is not None:
+                note += f"; suspect armed {sa:.2f}"
+            for j, line in enumerate(wrap(g, note, fb[12], bw)[:2]):
+                g.text((x0, y + j * 15), line, font=fb[12], fill=(110, 160, 255))
+            y += 32
+        else:
+            y += 4
         if inc and t >= inc_t0 and inc.get("caption_text"):
             g.text((x0, y), "Jev caption (incident subject)", font=fb[12], fill=(200, 200, 210))
             for j, line in enumerate(wrap(g, inc["caption_text"], f[13], bw)[:6]):
                 g.text((x0, y + 18 + j * 17), line, font=f[13], fill=(255, 235, 200))
-        g.text((x0, VH - 40), f"strips so far: {len(st)}   people now: {len(people)}", font=f[11], fill=(150, 150, 160))
+        g.text((x0, VH - 40), f"strips so far: {len(st)}   people now: {len(people)} (police {len(cops)})", font=f[11], fill=(150, 150, 160))
         g.text((x0, VH - 24), "YOLO11s person tracks; Jev judge + deployed policy", font=f[11], fill=(150, 150, 160))
         # timeline strip
         ty, lx, rx = VH + 10, 16, CW - 16
@@ -223,6 +269,11 @@ def render(d: Path, weights: str):
         enc.stdin.write(img.tobytes())
     enc.stdin.close()
     enc.wait()
+    summ["subject_resnapped_s"] = round(summ["subject_resnapped_s"], 1)
+    summ["no_suspect_s"] = round(summ["no_suspect_s"], 1)
+    summ["deploy_suspect"] = dep_id
+    (d / "police_summary.json").write_text(json.dumps(summ))
+    print(d.name, summ)
     print(d / "annotated.mp4", subprocess.run(["du", "-h", str(d / "annotated.mp4")], capture_output=True, text=True).stdout.split()[0])
 
 
