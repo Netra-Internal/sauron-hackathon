@@ -1,8 +1,9 @@
+# usage: python deck/export.py deck   (run from the repo root)
 # render deck slide files -> PNG (headless chromium) -> PDF + picture pptx with notes
 import json, re, sys, html, subprocess, glob, os
-S = sys.argv[1]; D = f"{S}/deck/project"; R = f"{S}/render"; os.makedirs(R, exist_ok=True)
-# /_blob/<id> asset ids in the slides -> local image files (S/img/)
-blobs = {"939e9d12fa84ebadfb1b47c68779fc23": "dash-live.png", "1c5bf139d362544fec913b712325d378": "calib-camera.png",
+S = sys.argv[1]; D = f"{S}/project"; R = f"{S}/render"; os.makedirs(R, exist_ok=True)
+# /_blob/<id> asset ids in the slides -> image files under S/img/
+blobs = {"939e9d12fa84ebadfb1b47c68779fc23": "../../plans/dash-live.png", "1c5bf139d362544fec913b712325d378": "../../plans/calib-camera.png",
          "8624698d1c05014614ebc996a92f0931": "bike-lock.jpg", "85f0303797ef2f847365c1ac04128591": "catalytic.jpg",
          "39fb0b2e7b6874c21b876745f4901703": "fence-climb.jpg"}
 deck = json.load(open(f"{D}/deck.json"))
@@ -18,7 +19,7 @@ for sid in deck["order"]:
     h = open(f"{D}/slides/{sid}.html").read()
     h = re.sub(r"<x-connector[^>]*></x-connector>", arrow, h)
     for b, f in blobs.items():
-        h = h.replace(f"/_blob/{b}", f"file://{S}/img/{f}")
+        h = h.replace(f"/_blob/{b}", "file://" + os.path.abspath(f"{S}/img/{f}"))
     open(f"{R}/{sid}.html", "w").write(f"<!doctype html><html><head><meta charset='utf-8'>{links}<style>{css}</style></head><body>{h}</body></html>")
     subprocess.run([chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars", "--allow-file-access-from-files",
                     f"--user-data-dir={S}/chrome-prof", "--window-size=1920,1080", "--virtual-time-budget=6000",

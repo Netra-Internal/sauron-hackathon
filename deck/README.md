@@ -9,7 +9,7 @@ Exports in William's Documents: `Sauron-Hackathon-Deck.pptx` / `.pdf`.
   Images are artifact assets (`/_blob/<id>`): `plans/dash-live.png`, `plans/calib-camera.png` and the crime stills in `img/`
   (frames from `~/sauron-data/crimevid/out/<clip>/annotated.mp4` at the deploy moment).
 - `export.py`: renders each slide in headless Chromium at 1920x1080 and builds a PDF and a picture-per-slide .pptx with the notes.
-  `python export.py <dir>`, where `<dir>` holds `deck/project/` and `img/` (needs python-pptx + Pillow, playwright's chromium-1247).
+  `python deck/export.py deck` from the repo root (needs python-pptx + Pillow and playwright's chromium-1247); writes `deck/render/` and `deck/Sauron-Hackathon-Deck.{pdf,pptx}`.
   The pptx text isn't editable; the page's own Export gives an editable one.
 
 Every number on the slides comes from `status/*.md` (sources listed in `status/deck.md`). No secrets in this folder.
