@@ -31,7 +31,7 @@ William: "find videos of criminals online and show that we can catch them with o
 ## Rules
 - Jev: OK up to $15 total without asking (estimate first; $0.042/M input tokens, ~$0.00037 per strip).
 - Laptop has 16 GB shared with 6 agents: ONE CPU model job at a time, `free -g` first, run YOLO sequentially. If it's too
-  slow, you may run YOLO on a RunPod pod ≤ $0.60/h that self-exits — NOT the production edge pod izuotrrx9igtpk.
+  slow, you may run YOLO on a RunPod pod ≤ $0.60/h that self-exits — NOT the production edge pod <pod-id>.
 - Never post these as live incidents (mode=replay only, never forwarded; better: don't touch the droplet at all).
 - Honest: if Jev misses a clip, show the miss. Real numbers only.
 Done = artifact link + status/crimevid.md DONE with the table. Post the first finished video path in status as soon as it exists.

@@ -3,8 +3,8 @@
 # The pod's mediamtx user "demo" may publish only path jetson-c920; the pod's edge + Jev dispatch pick it up within 15 s.
 #   PASS=<demo password> ./demo-push.sh /dev/video0            # USB webcam: x264 1080p 5 fps, 1 s GOP, ~1.5 Mbit/s
 #   PASS=<demo password> ./demo-push.sh rtsp://user:pw@cam/...  # IP camera: stream copy (set the camera's GOP to ~1 s)
-# POD=63.141.33.141:<public port for 8322> (changes when the pod restarts). Loops: reconnects every 3 s if it drops.
-SRC=$1; POD=${POD:-63.141.33.141:22127}; CAM=${CAM:-jetson-c920}
+# POD=<pod>:<public port for 8322> (changes when the pod restarts). Loops: reconnects every 3 s if it drops.
+SRC=$1; POD=${POD:?set POD=<pod-ip>:<pod-port>}; CAM=${CAM:-jetson-c920}
 OUT="rtsps://demo:$PASS@$POD/$CAM"
 while true; do
   case $SRC in

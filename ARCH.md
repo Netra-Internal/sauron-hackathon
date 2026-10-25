@@ -15,7 +15,7 @@ William's decisions (Oct 24, 14:20 PDT):
 | `hackdash/live.py` | agent `boxes` | APIRouter: cameras, live frame + person boxes + suspicion labels |
 | `hackdash/launch.py`, `droplink/` | agent `launch` | APIRouter: send drone / abort / incident state; droplink receiver service |
 
-## Runtime (droplet flywheel-01, root@104.131.163.205)
+## Runtime (droplet flywheel-01, <droplet>)
 - `sauron-hack.service`: uvicorn hackdash.app:app on 127.0.0.1:8500, code in /opt/netra/sauron-hack, env /etc/sauron-hack.env.
 - Public at https://internal.netralabs.net/hack/ (nginx location, behind the same internal login as /ask; check how /ask
   is protected and reuse it).

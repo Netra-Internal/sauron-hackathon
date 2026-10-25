@@ -10,7 +10,7 @@ browser /hack/ ── ptz.js ──> hackdash/ptz.py (droplet :8500, /hack/api/p
               ptzd-tunnel :8530 ──┤ (commands)       ssh -L over Tailscale
           ptzd-tunnel-img :8531 ──┘ (snapshots)
                                   v
-                      ptzd/ptzd.py (Jetson 127.0.0.1:8530) ── VAPIX digest ──> Axis 192.168.0.90
+                      ptzd/ptzd.py (Jetson 127.0.0.1:8530) ── VAPIX digest ──> Axis <camera-ip>
 ```
 
 | piece | what |

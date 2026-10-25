@@ -18,8 +18,8 @@ do not re-add them).
    && pytest` pass on a clean checkout (skip tests needing the droplet/netra-ask with clear skip reasons). Verify it goes green.
 4. Repo metadata via gh: description, topics (computer-vision, security, drones, ai-agents, jetson, runpod, …), homepage =
    https://internal.netralabs.net/hack/ .
-5. Sanitize CURRENT files (history stays; that's OK): replace the droplet IP 104.131.163.205, tailnet 100.x.x.x addresses,
-   the pod IP/port 63.141.33.141:*, ssh user@host lines, pod ids, and camera LAN creds placeholders with placeholders like
+5. Sanitize CURRENT files (history stays; that's OK): replace the droplet IP <droplet-ip>, tailnet 100.x.x.x addresses,
+   the pod IP/port <pod-ip>:*, ssh user@host lines, pod ids, and camera LAN creds placeholders with placeholders like
    <droplet>, <jetson>, <pod>; same in status/ and briefs/. Do NOT move or rename status/ or briefs/ (agents write there live);
    instead add docs/how-we-built-it.md: the agent-team story (manager + 9 agents in tmux, briefs → status → merge), with links.
    Remove obviously useless clutter (stray __pycache__, temp files) and add a .gitignore.

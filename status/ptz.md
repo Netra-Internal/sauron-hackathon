@@ -51,8 +51,8 @@ arrives from the Cloudflare egress 69.196.39.231, mine and William's alike.
 
 ## Deployed (22:48–23:0x UTC) — what is where
 - Jetson (jetson-cloud): ptzd.service (new unit, DynamicUser, 127.0.0.1:8530), /opt/netra/ptzd/ptzd.py, /etc/ptzd.env (root 600:
-  creds from ~/.config/netra/axis-q6215.env + token). Camera 192.168.0.90 on enP8p1s0. No other Jetson unit touched.
-- Droplet: ptzd-tunnel.service (new, ssh -L 127.0.0.1:8530 -> netra@100.102.178.107, same pattern as netra-ask-edge-tunnel);
+  creds from ~/.config/netra/axis-q6215.env + token). Camera <camera-ip> on enP8p1s0. No other Jetson unit touched.
+- Droplet: ptzd-tunnel.service (new, ssh -L 127.0.0.1:8530 -> <jetson>, same pattern as netra-ask-edge-tunnel);
   /etc/ptzd-token (root:netra 640).
 - sauron-hack: I copied ONLY hackdash/ptz.py, ptz_zoomcal.json, static/ptz.{js,css} and changed the one ROUTERS line in the
   DEPLOYED app.py (the deployed tree had other agents' work, e.g. relay.py, so no full rsync). Backup /root/sauron-hack-bak-ptz-224841.

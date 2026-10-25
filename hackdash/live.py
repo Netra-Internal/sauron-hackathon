@@ -40,7 +40,7 @@ DATABASE_URL = os.environ.get("ASK_DATABASE_URL", "postgresql:///netra_ask")
 SITES_YAML = Path(os.environ.get("ASK_SITES_YAML", "/opt/netra/netra-ask/ask/sites.yaml"))
 TEST_RIGS = set(os.environ.get("HACK_TEST_RIGS", "jetson-c920").split(","))
 # sites.yaml node_id -> ssh target for the judge check
-JUDGE_SSH = dict(kv.split("=", 1) for kv in os.environ.get("HACK_JUDGE_SSH", "jetson-cloud=netra@100.102.178.107").split(",") if "=" in kv)
+JUDGE_SSH = dict(kv.split("=", 1) for kv in os.environ.get("HACK_JUDGE_SSH", "").split(",") if "=" in kv)
 KNOWN_HOSTS = os.environ.get("HACK_KNOWN_HOSTS", "/tmp/sauron-hack-known_hosts")
 KINDS = set(os.environ.get("HACK_BOX_KINDS", "person").split(","))   # edge track kinds drawn (person; others for testing)
 

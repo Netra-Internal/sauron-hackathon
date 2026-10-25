@@ -2,14 +2,14 @@
 # Install ptzd next to the Axis and the tunnel that lets the droplet's sauron-hack reach it on 127.0.0.1:8530.
 # Run from a laptop checkout:
 #   bash ptzd/install.sh BOX forward DROPLET_TARGET   the droplet dials the box: DROPLET_TARGET = ssh target as the
-#                                                     droplet sees it (e.g. netra@100.102.178.107, like netra-ask-edge-tunnel)
+#                                                     droplet sees it (e.g. <jetson>, like netra-ask-edge-tunnel)
 #   bash ptzd/install.sh BOX reverse                  the box dials the droplet (box behind NAT, e.g. a laptop); the box's
 #                                                     key is authorised on the droplet for that one port forward only
 # BOX = ssh target from this laptop, with sudo. Camera creds: ~/.config/netra/axis-q6215.env (CAM_HOST=... overrides the IP).
 # The token is created once on the droplet (/etc/ptzd-token, root:netra 640; hackdash/ptz.py reads it).
 set -euo pipefail
 BOX=$1; MODE=$2; FWD=${3:-}
-DROPLET=${DROPLET:-root@104.131.163.205}
+DROPLET=${DROPLET:?set DROPLET=root@<droplet>}
 DROPLET_HOST=${DROPLET#*@}
 CAMENV=${CAMENV:-$HOME/.config/netra/axis-q6215.env}
 cd "$(dirname "$0")"

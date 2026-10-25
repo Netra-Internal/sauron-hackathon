@@ -2,7 +2,7 @@
 William: "move us off of jetson edge compute and on to some kind of cloud compute (runpod)".
 
 ## Today (verify, don't trust)
-- Jetson `jetson-cloud` (ssh netra@jetson-cloud, Orin 7.5 GB, ~2.5 GB free, GR3D ~86% with c920 alone) runs per camera
+- Jetson `jetson-cloud` (ssh <jetson>, Orin 7.5 GB, ~2.5 GB free, GR3D ~86% with c920 alone) runs per camera
   `netra-edge@<cam>` (netra-ask ask/edge/: RTSP pull → YOLO TRT person/vehicle boxes + tracks → 1 s buckets POSTed to
   the droplet /ask/api/edge/bucket, crops, preview.jpg) and `netra-edge-serve` (ring buffer 48 GB + /frame /clip, reached
   by the droplet through `netra-ask-edge-tunnel` at 127.0.0.1:8450). Cameras: jetson-c920 = USB C920 → mediamtx shim

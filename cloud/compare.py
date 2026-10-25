@@ -16,7 +16,7 @@ import statistics as st
 import subprocess
 import sys
 
-D = os.environ.get("DROPLET", "root@104.131.163.205")
+D = os.environ["DROPLET"]  # root@<droplet>
 
 
 def psql(sql: str) -> list[list[str]]:

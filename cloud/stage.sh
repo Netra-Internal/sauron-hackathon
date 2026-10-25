@@ -17,7 +17,7 @@ cloud/r2.sh put pod/code.tgz < "$TMP/code.tgz"
 cloud/r2.sh put pod/cloud.tgz < "$TMP/cloud.tgz"
 cloud/r2.sh put pod/boot.sh < cloud/pod/boot.sh
 M=_work/netra-ask/models
-TOKEN=$(ssh -o BatchMode=yes root@104.131.163.205 'grep ^ASK_WORKER_TOKEN= /etc/netra-ask.env | cut -d= -f2-')
+TOKEN=$(ssh -o BatchMode=yes "${DROPLET:?set DROPLET=root@<droplet>}" 'grep ^ASK_WORKER_TOKEN= /etc/netra-ask.env | cut -d= -f2-')
 python3 - "$MODE" "$CAMS" "$SHA" "$TOKEN" "$PUSH_PASS" \
   "$(cloud/r2.sh url pod/boot.sh)" "$(cloud/r2.sh url pod/code.tgz)" "$(cloud/r2.sh url pod/cloud.tgz)" \
   "$(cloud/r2.sh url $M/yolo11s-1280-nms.onnx)" "$(cloud/r2.sh url $M/yolo11s-640-nms.onnx)" \
