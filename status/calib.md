@@ -142,3 +142,16 @@ All netra-edge@* units on jetson-cloud were stopped at 14:53:27 PDT (not by me; 
 ## Notes
 - The current camera-1-5621 fit is poor (15.5 px rms, LOO 6.6 m median, 21.7 m worst; pairs 2-4 are far off). The screen says so honestly.
 - Not verified: the green live-people dots with real people, because the edge is down. The /people code path is exercised only on a still-only record ("no live feed").
+
+## Repo push (one-repo request)
+PUSHED 1da00bf
+- Branch `hack-calib` in Netra-Internal/sauron-hackathon has everything I built and deployed today.
+  - Code: `hackdash/calib.py`, `hackdash/static/calib.{js,css}`, the `app.py` mount line, and the `hack.js` hook.
+  - Tests: `tests/test_calib.py`.
+  - Tools: `tools/calib_roundtrip.py`, `calib_shots.js`, `calib_sitesetup_check.js`.
+  - Screenshots: `plans/calib-*.png`.
+  - Dependency: `numpy` in `requirements.txt`.
+  - README: `hackdash/CALIB.md`.
+  - Env template: `tools/hack-launch.env.example` (placeholders only).
+- Deploy uses the shared `deploy/install.sh` and `sauron-hack.service` as they are in the repo; I added no unit, nginx or secret of my own.
+- The calib state on the droplet (`/var/lib/sauron-hack/calib`) is runtime data and is not in the repo.

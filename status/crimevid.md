@@ -17,3 +17,6 @@ DONE — page https://claude.ai/artifact/HAjU6Ncdn3FY9ci6hzzrrf (private; Willia
 - Code: Netra-Internal/sauron-hackathon branch hack-crimevid, crimevid/ (run.sh, prep.sh, render.py, police.py, page.py, upload_r2.py).
 - PTZ: crimevid sent NO commands to the Axis PTZ, ever. Only read-only ssh to jetson-cloud (md5sum, systemctl cat, env read) at ~15:30.
 - Side effect: ultralytics auto-installed `lap` into ~/sauron-venv (needed for ByteTrack).
+
+## Push
+PUSHED 80b8e69 (Netra-Internal/sauron-hackathon branch hack-crimevid, crimevid/: README, prep.sh, run.sh, render.py, police.py, page.py, page.tpl.html, summary.html, upload_r2.py; no secrets; nothing deployed)

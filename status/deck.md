@@ -1,22 +1,21 @@
-DONE: Sauron hackathon deck (11 slides, claude.ai Slides artifact, private, not shared): https://claude.ai/artifact/DYN11dp3UtpFUi8ic2Pn7n
+DONE: Sauron hackathon deck (12 slides, crimevid final results in, claude.ai Slides artifact, private, not shared): https://claude.ai/artifact/DYN11dp3UtpFUi8ic2Pn7n
 
 ## What's in it
 1 cover (SAURON — sees, judges, sends a drone) · 2 problem · 3 what we built today (6-step chain) · 4 architecture (camera → Jetson capture → RunPod A5000 $0.27/h → droplet → /hack/ + droplink; edge→cloud cutover 22:19 UTC)
-5 live /hack/ screenshot (plans/dash-live.png, 4:25 PM) · 6 real crime clips (3 stills + table) · 7 judge: facts → policy → verdict (catalytic still)
-8 person → coordinate (plans/calib-camera.png, ±6.6 m LOO median, worst 21.7 m, test rig) · 9 measured numbers · 10 what's next · 11 close (team: Pranay CEO, Landon CTO, William COO)
+5 live /hack/ screenshot (plans/dash-live.png, 4:25 PM) · 6 crime hero: fence-climb still, +3.5 s, 5/5 crimes deployed, 0/2 benign · 7 every clip: status/crimevid.md table (7 rows)
+8 judge: facts → policy → verdict (catalytic still) · 9 person → coordinate (plans/calib-camera.png, ±6.6 m LOO median, worst 21.7 m, test rig) · 10 measured numbers · 11 what's next · 12 close (team: Pranay CEO, Landon CTO, William COO)
 Speaker notes on every slide. Look: near-black, one ember accent (#FF6A1A), Space Grotesk + IBM Plex Mono. Downloads as .pptx / PDF from the page.
 
 ## Exported files (William's Windows Documents; not redirected to OneDrive: HKCU User Shell Folders Personal = %USERPROFILE%\Documents)
-- /mnt/c/Users/wstobaugh/Documents/Sauron-Hackathon-Deck.pptx  (C:\Users\wstobaugh\Documents\Sauron-Hackathon-Deck.pptx) 11 slides, 4.1 MB, speaker notes on all 11
-- /mnt/c/Users/wstobaugh/Documents/Sauron-Hackathon-Deck.pdf   (C:\Users\wstobaugh\Documents\Sauron-Hackathon-Deck.pdf) 11 pages, 1.5 MB
+- /mnt/c/Users/wstobaugh/Documents/Sauron-Hackathon-Deck.pptx  (C:\Users\wstobaugh\Documents\Sauron-Hackathon-Deck.pptx) 12 slides, speaker notes on all 12
+- /mnt/c/Users/wstobaugh/Documents/Sauron-Hackathon-Deck.pdf   (C:\Users\wstobaugh\Documents\Sauron-Hackathon-Deck.pdf) 12 pages
 - How: the Playwright browser is not signed in to claude.ai, so the page's own Export couldn't be used. I rendered the 11 slide files locally
   in headless Chromium at 1920x1080 and built the PDF and pptx from those renders. The pptx slides are PICTURES (text not editable); for an
-  editable pptx, William can use Export on the artifact page. I checked all 11 renders: nothing overflows.
+  editable pptx, William can use Export on the artifact page. I checked the renders (re-exported 16:59 PDT after the crimevid update): nothing overflows.
 
 ## Numbers and where they come from
-- crime: ~/sauron-data/crimevid/out/*/timeline.json. fence-climb +3.5 s, bike-lock +5.5 s, catalytic +11.5 s.
-  ⚠ The brief said bike lock +3.5 s; the rendered timeline (and status/crimevid.md) say +5.5 s, so the deck says +5.5 s.
-  Gaps stated on the slide: atm-rip unfinished, car-breakin and normal clips not scored (no false-alarm rate), 0 police in these 3.
+- crime: status/crimevid.md (DONE) table, verbatim: atm-rip +3.5, fence-climb +3.5 (hero), bike-lock +5.5 (police from 11.5 s, after deploy),
+  catalytic +11.5 (slow), car-breakin +12.5 (slow), owner-car-1/2 never (E 0.00). Jev $0.054. Page: https://claude.ai/artifact/HAjU6Ncdn3FY9ci6hzzrrf
 - launch: status/launch.md (click → droplink 2.78 s, click → netra-ask 0.79 s, abort ordering end → closed → abort).
 - PTZ ~0.5 s median: status/ptz.md. Pod 5 fps / 40-43 ms (Axis), 34-46 ms vs Jetson 75-86 ms, HLS cold start 0.78-1.57 s: status/cloud.md.
 - Box lag 2.9-6.4 s: status/boxes.md. Calibration: status/calib.md + calib-camera.png.

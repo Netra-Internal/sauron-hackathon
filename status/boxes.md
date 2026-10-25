@@ -1,5 +1,16 @@
 DONE: relay LIVE at https://internal.netralabs.net/hack/relay (deployed 22:21 UTC, hack-boxes 815cbbf, merged with origin/main). Agent cloud can point the RunPod edge's ask base URL there now.
 
+## Repo push (re the manager's ONE-repo request)
+PUSHED 353de40
+- origin/hack-boxes 353de40 holds everything I built or deployed today:
+  - hackdash/live.py and hackdash/relay.py;
+  - the app.py mount + login exemption;
+  - hackdash/nginx-edge-mirror.conf;
+  - hackdash/live-relay.env.example (a template with token placeholders, no secrets; a secret scan of my files is clean);
+  - tests/test_live.py;
+  - hackdash/README-boxes.md.
+- The droplet runs 815cbbf, the same code. 353de40 only adds the README and the env template. The working tree is clean.
+
 ## PTZ check (re the manager's STOP, 22:2x UTC)
 - I sent ZERO commands to the Axis PTZ (or any camera), in the last 15 min and all session: no pan, tilt, zoom, home, preset, areazoom, day/night,
   and no position queries either. My code (live.py, relay.py, tests) has no ptz, vapix or axis-cgi calls (`git grep` is empty).
