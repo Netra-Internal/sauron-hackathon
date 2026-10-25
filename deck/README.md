@@ -6,7 +6,7 @@ Exports in William's Documents: `Sauron-Hackathon-Deck.pptx` / `.pdf`.
 
 - `project/deck.json` + `project/slides/<id>.html`: the deck's own source files, as published to the artifact
   (Slides type format: one `<section>` per slide, inline styles, speaker notes in `<aside>`).
-  Images are artifact assets (`/_blob/<id>`): `plans/dash-live.png`, `plans/calib-camera.png` and the crime stills in `img/`
+  Images are artifact assets (`/_blob/<id>`); the same files are in `img/`: dash-live.png (the 4:25 PM /hack/ screenshot), calib-camera.png and the crime stills
   (frames from `~/sauron-data/crimevid/out/<clip>/annotated.mp4` at the deploy moment).
 - `export.py`: renders each slide in headless Chromium at 1920x1080 and builds a PDF and a picture-per-slide .pptx with the notes.
   `python deck/export.py deck` from the repo root (needs python-pptx + Pillow and playwright's chromium-1247); writes `deck/render/` and `deck/Sauron-Hackathon-Deck.{pdf,pptx}`.
