@@ -5,7 +5,7 @@
 # branch that lacks another agent's router doesn't wipe it. Touches only our own files, unit and nginx block;
 # never netra-ask's unit or files.
 set -euo pipefail
-HOST=${HACK_HOST:-root@104.131.163.205}
+HOST=${HACK_HOST:?set HACK_HOST=root@<droplet>}
 SRC=$(cd "${1:-$(dirname "$0")/..}" && pwd)
 DEST=/opt/netra/sauron-hack
 
@@ -34,8 +34,9 @@ if [ ! -f /etc/sauron-hack.env ]; then
 fi
 mkdir -p /var/lib/sauron-hack && chown netra:netra /var/lib/sauron-hack
 KH=/var/lib/sauron-hack/known_hosts      # the Jetson's host key, copied from root's (already trusted) known_hosts
-if ! ssh-keygen -F 100.102.178.107 -f $KH >/dev/null 2>&1; then
-  ssh-keygen -F 100.102.178.107 -f /root/.ssh/known_hosts | grep -v '^#' >> $KH || true
+JET=$(sed -n 's/^HACK_JUDGE_SSH=.*@\([^, ]*\).*/\1/p' /etc/sauron-hack.env | head -1)   # the Jetson host, kept off git
+if [ -n "$JET" ] && ! ssh-keygen -F "$JET" -f $KH >/dev/null 2>&1; then
+  ssh-keygen -F "$JET" -f /root/.ssh/known_hosts | grep -v '^#' >> $KH || true
   chown netra:netra $KH; chmod 644 $KH
 fi
 

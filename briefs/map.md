@@ -28,7 +28,7 @@ status/map.md and stop.
    stream). Design the operator-launch path: a click on track T creates (or upgrades) an incident for T with
    mode=live, verdict deploy, reason operator_launch, subject_track=T, crop from the frame, lat/lon via
    `ask.sitemap.pixel_to_latlon` (needs a calibrated camera — check which cameras are calibrated in the droplet DB:
-   `ssh root@104.131.163.205 'sudo -u netra psql netra_ask'`, tables sites/site_cameras), then forwards through the
+   `ssh <droplet> 'sudo -u netra psql netra_ask'`, tables sites/site_cameras), then forwards through the
    existing signed channel so the position stream (#6) follows T. NOTE (William's rule): autonomous launch stays — this
    click is an EXTRA trigger, never an approval gate on Sauron's own launches.
 5. **Gaps and the smallest path to a working demo today**, ordered, with an estimate each, and a split into 3-5 work

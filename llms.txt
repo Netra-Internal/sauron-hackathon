@@ -1,0 +1,29 @@
+# Sauron — autonomous site security (Netra hackathon, Oct 24 2026)
+
+> Cameras → person detection on a cloud GPU → a VLM dispatch judge (facts → policy → verdict) → the person placed on the
+> map (lat/lon ± m) → an HMAC-signed drone launch. Built in one day by a team of Claude agents on Netra's existing stack.
+> Live, public: https://internal.netralabs.net/hack/ . Tests: `pip install -r requirements.txt && pytest`.
+
+## Start here
+- [AGENTS.md](AGENTS.md): repo map for AI reviewers. Every claim linked to its evidence, test and code; reading order; built today vs reused
+- [README.md](README.md): overview, architecture diagram, results table
+- [ARCH.md](ARCH.md): API contract
+
+## Evidence
+- [status/crimevid.md](status/crimevid.md): 5/5 real crime clips deployed, 0/2 benign, fastest +3.5 s
+- [status/launch.md](status/launch.md): click → accepted 0.8 s → signed launch at the receiver 2.8 s; abort path
+- [status/calib.md](status/calib.md): person → coordinate, leave-one-out 7.2 m median (test rig)
+- [status/ptz.md](status/ptz.md): PTZ latency and the operator-only guard
+- [status/cloud.md](status/cloud.md): edge moved from the Jetson to a RunPod RTX A5000 ($0.27/h)
+- [media/crimevid/](media/crimevid/): annotated videos
+
+## Code
+- [hackdash/](hackdash/): operator page + API (live boxes, relay, launch/abort, calibration, PTZ)
+- [droplink/droplink.py](droplink/droplink.py): signed drone-message receiver
+- [ptzd/ptzd.py](ptzd/ptzd.py): allow-listed VAPIX proxy
+- [cloud/](cloud/): Jetson → pod push, pod edge supervisor
+- [crimevid/](crimevid/): crime-clip replay through the real judge
+- [tests/](tests/): unit tests (CI: .github/workflows/tests.yml)
+
+## How it was built
+- [docs/how-we-built-it.md](docs/how-we-built-it.md): a manager agent and one Claude agent per brief, coordinated through briefs/ → status/ → merge

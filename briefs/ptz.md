@@ -1,7 +1,7 @@
 # Brief: ptz — manual pan/tilt/zoom for the Axis from /hack/ (agent `launch` takes this)
 William: "Axis camera is now connected — get the AI to use that. I would like to control it manually to make it look at
 the right place with the right zoom."
-- Camera: AXIS Q6215-LE PTZ (30x), creds ~/.config/netra/axis-q6215.env (PTZ_CAM_HOST/USER/PASS, was 192.168.0.90),
+- Camera: AXIS Q6215-LE PTZ (30x), creds ~/.config/netra/axis-q6215.env (PTZ_CAM_HOST/USER/PASS, was <camera-ip>),
   VAPIX: /axis-cgi/com/ptz.cgi (continuouspantiltmove=x,y / continuouszoommove=z / move=stop / rzoom / areazoom /
   query=position / gotoserverpresetname / setserverpresetname), digest auth. Prior integration: ~/netra/netra-ptz-wt-axis
   (rig axis, hardware.py) + memory netra-axis-q6215-connection (zoom cal tele 2.88°).

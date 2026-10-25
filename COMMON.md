@@ -15,9 +15,9 @@ Read your own brief in briefs/<you>.md. This file holds the rules shared by all 
 
 ## Machines (state checked 13:37 PDT today)
 - Laptop WSL: 16 GB RAM shared by every agent + Chromium. ONE CPU model job at a time across all agents; run `free -g` before loading a model; no unguarded nohup jobs. Disk: `df -h /mnt/c` (C: has ~61 GB) — ask before anything > 5 GB.
-- jetson-cloud (`ssh netra@jetson-cloud`, Orin, 7.5 GB, ~2.5 GB available): edge units for axis-q6215 / jetson-c920 / node3-c920 + edge-serve + LTE running. Do not stop or restart units without the manager. netra-dispatch@jetson-c920 is disabled on purpose (Jev tokens) — start only for a demo window.
+- jetson-cloud (`ssh <jetson>`, Orin, 7.5 GB, ~2.5 GB available): edge units for axis-q6215 / jetson-c920 / node3-c920 + edge-serve + LTE running. Do not stop or restart units without the manager. netra-dispatch@jetson-c920 is disabled on purpose (Jev tokens) — start only for a demo window.
 - netra-ptz (second Jetson, Sauron viewer :8060): OFFLINE today (not on tailnet, cable IP unreachable).
-- Droplet flywheel-01 `ssh root@104.131.163.205`: netra-ask (internal.netralabs.net/ask), catalog, evald, map. DB: `sudo -u netra psql netra_ask`. Use `systemd-run --unit` for temp servers, never `pkill -f` there.
+- Droplet flywheel-01 `ssh <droplet>`: netra-ask (internal.netralabs.net/ask), catalog, evald, map. DB: `sudo -u netra psql netra_ask`. Use `systemd-run --unit` for temp servers, never `pkill -f` there.
 - node3: offline 3 days.
 
 ## Money

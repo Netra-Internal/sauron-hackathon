@@ -7,10 +7,10 @@
 # Wi-Fi only: the route to the relay must leave through $WIFI_IF, checked before connecting and every 10 s; if it moves
 # (Wi-Fi down, default route on LTE: lte0 is capped at 25 MB/h) everything is killed and nothing is sent until it's back.
 #   env (/etc/netra-cloud-push.env): STREAMS="jetson-c920=rtsp://127.0.0.1:8556/c920 [id=url ...]"  POD=ip:port
-#        PUSH_PASS  RELAY=cloudrelay@104.131.163.205  RELAY_KEY=~/.ssh/cloudrelay_ed25519 (no passphrase; the droplet
+#        PUSH_PASS  RELAY=cloudrelay@<droplet>  RELAY_KEY=~/.ssh/cloudrelay_ed25519 (no passphrase; the droplet
 #        restricts it to port-forwarding to POD)  WIFI_IF=wlP1p1s0  EDGE_FFMPEG=/opt/ffmpeg/ffmpeg
 set -u
-FF=${EDGE_FFMPEG:-/opt/ffmpeg/ffmpeg}; WIFI_IF=${WIFI_IF:-wlP1p1s0}; RELAY=${RELAY:-cloudrelay@104.131.163.205}
+FF=${EDGE_FFMPEG:-/opt/ffmpeg/ffmpeg}; WIFI_IF=${WIFI_IF:-wlP1p1s0}; RELAY=${RELAY:?set RELAY=cloudrelay@<droplet>}
 LPORT=${LPORT:-18322}; RELAY_IP=${RELAY#*@}
 via_wifi() { ip route get "$RELAY_IP" 2>/dev/null | grep -q " dev $WIFI_IF "; }
 pids=()

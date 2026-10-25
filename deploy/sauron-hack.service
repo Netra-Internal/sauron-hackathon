@@ -10,8 +10,7 @@ WorkingDirectory=/opt/netra/sauron-hack
 EnvironmentFile=-/etc/netra-ask.env
 EnvironmentFile=/etc/sauron-hack.env
 Environment=HOME=/home/netra
-# read-only checks on the Jetson (judge on/off) as netra, with our own known_hosts
-Environment="HACK_JETSON_SSH=ssh -o BatchMode=yes -o ConnectTimeout=5 -o UserKnownHostsFile=/var/lib/sauron-hack/known_hosts netra@100.102.178.107"
+# the Jetson judge check (HACK_JUDGE_SSH=jetson-cloud=netra@<jetson-ip>) and HACK_KNOWN_HOSTS live in /etc/sauron-hack.env
 StateDirectory=sauron-hack
 ExecStart=/opt/netra/sauron-hack/.venv/bin/uvicorn hackdash.app:app --host 127.0.0.1 --port 8500 --workers 1 --proxy-headers
 Restart=always

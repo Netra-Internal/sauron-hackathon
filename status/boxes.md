@@ -30,7 +30,7 @@ PUSHED 353de40
 - The Jetson mirror path /hack/api/_edge/bucket is unchanged (feed only).
 - Tested locally against a fake slow, flaky netra-ask (0.3 s per POST, 25% 503s): 20 buckets were answered in 0.64 s total and all 20 arrived
   in order after 4 retries.
-- REAL buckets, 22:23 UTC: the RunPod edge (63.141.33.141) posts buckets about 1/s plus heartbeats; every one got 200 at once.
+- REAL buckets, 22:23 UTC: the RunPod edge (<pod>) posts buckets about 1/s plus heartbeats; every one got 200 at once.
   28 were forwarded to netra-ask in 30 s, the backlog stayed at 0-3 (0.2 MB), 0 were rejected, and the netra-ask journal shows the ingests.
 - app.py: a minimal edit. It mounts hackdash.relay at /hack/relay and adds the 3 relay edge paths to NO_LOGIN.
 
