@@ -4,14 +4,16 @@ The API routers belong to other pieces (hackdash.live = cameras, live frame, per
 drone, abort, incidents, drone messages). They are imported tolerantly: a router that is missing or fails to import
 is reported by /hack/api/health and its routes answer 404, so the page shows "not deployed" instead of anything made up.
 
-Auth: the one internal.netralabs.net login (netra-internal common.auth: the /map/login cookie or HTTP basic), the same
-as /ask. HACK_NO_AUTH=1 turns it off for a local dev server only.
+Auth: public view. Any GET/HEAD under /hack (page, API reads, and /hack/stream via nginx's auth_request to
+/hack/api/health) works without a login. Writes need the one internal.netralabs.net login (netra-internal common.auth:
+the /map/login cookie or HTTP basic, the same as /ask). HACK_NO_AUTH=1 turns it off for a local dev server only.
 """
 from __future__ import annotations
 
 import importlib
 import logging
 import os
+import re
 import sys
 import traceback
 from pathlib import Path
@@ -57,16 +59,26 @@ def user_of(req: Request) -> str | None:
     return internal_auth.user_of(req.headers) if internal_auth else None
 
 
+# Public view (William): anyone with the link sees everything (GET/HEAD) without a login; every write needs the login.
+# Harmless POSTs that only compute or show something stay public too. Internal-only reads stay behind the login.
+PUBLIC_POST = [re.compile(p) for p in (rf"^{PREFIX}/api/calib/freeze/[^/]+$",
+                                       rf"^{PREFIX}/api/calib/sites/[^/]+/cameras/[^/]+/project$")]
+LOGIN_GET = {f"{PREFIX}/relay/status"}
+
+
 @app.middleware("http")
 async def need_user(req: Request, call_next):
-    """Every /hack path needs the internal login. Pages redirect to it; the API answers 401."""
-    if req.url.path.startswith(PREFIX) and req.url.path not in NO_LOGIN:
+    """Reads under /hack are public (anonymous = req.state.user None); writes need the internal login (401)."""
+    path = req.url.path
+    if path.startswith(PREFIX) and path not in NO_LOGIN:
         u = user_of(req)
-        if not u:
-            if req.url.path.startswith(f"{PREFIX}/api"):
-                return JSONResponse({"detail": "sign in at /map/login"}, status_code=401)
-            return RedirectResponse(LOGIN, status_code=303)
         req.state.user = u
+        public = (req.method in ("GET", "HEAD") and path not in LOGIN_GET) or \
+                 (req.method == "POST" and any(p.match(path) for p in PUBLIC_POST))
+        if not u and not public:
+            if path.startswith(f"{PREFIX}/api") or req.method != "GET":
+                return JSONResponse({"detail": "sign in to control: /map/login?next=/hack/"}, status_code=401)
+            return RedirectResponse(LOGIN, status_code=303)
     return await call_next(req)
 
 

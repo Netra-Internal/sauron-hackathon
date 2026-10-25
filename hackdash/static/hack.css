@@ -146,3 +146,7 @@ img.qthumb { object-fit: cover; background: #000; }
   #stage { min-height: 50vh; flex: none; }
   aside { height: auto; padding: 10px 16px; }
 }
+
+/* public view: controls disabled, a link to sign in */
+a.signin { color: var(--accent); font-size: 12px; text-decoration: underline; white-space: nowrap; }
+.pchip button[disabled], .btn[disabled] { opacity: .45; cursor: not-allowed; }
