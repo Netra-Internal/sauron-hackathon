@@ -1,12 +1,36 @@
 # Sauron — autonomous site security (Netra hackathon, Oct 24 2026)
 
+[![tests](https://github.com/Netra-Internal/sauron-hackathon/actions/workflows/tests.yml/badge.svg)](https://github.com/Netra-Internal/sauron-hackathon/actions/workflows/tests.yml)
+
 **Slides:** https://docs.google.com/presentation/d/1DFFL7WKfvFmFfGj1GIm5n_uDdgEpInlzHpR_xEo7hNI/edit?usp=sharing
+
+**Live demo (public, no login):** operator page https://internal.netralabs.net/hack/ ·
+site map https://internal.netralabs.net/ask/sites#/site/ucsd-design-innovation-building-c1dd
 
 Sauron watches a site's cameras, decides when a person is doing something that matters, finds where they are on the
 map, and sends a drone to them. This repo is everything built for the hackathon in one day, by a team of Claude agents
 managed from tmux, on top of Netra's existing stack (netra-ask, the Jetson edge, the dispatch judge).
+AI reviewers: start at [AGENTS.md](AGENTS.md).
 
-![Fence climb: Sauron deploys 3.5 s after the climb starts](media/screens/fence-climb-deploy.jpg)
+![Fence climb: Sauron deploys 3.5 s after the climb starts](media/fence-climb.gif)
+
+## Results
+
+Measured today on real footage and real hardware, no per-clip tuning. Every number links to the report it came from.
+
+| claim | number | evidence | code / check |
+|---|---|---|---|
+| real crime clips that end in a drone deploy | **5/5** | [status/crimevid.md](status/crimevid.md) | [crimevid/run.sh](crimevid/run.sh), videos [media/crimevid/](media/crimevid/) |
+| benign clips (owner at own car) that deploy | **0/2** | [status/crimevid.md](status/crimevid.md) | [media/crimevid/owner-car-1.mp4](media/crimevid/owner-car-1.mp4) |
+| deploy after the crime starts, fence climb / ATM rip-out | **+3.5 s** | [status/crimevid.md](status/crimevid.md) | [media/crimevid/fence-climb.mp4](media/crimevid/fence-climb.mp4) |
+| Jev (VLM judge) cost for the whole clip set | **$0.054** | [status/crimevid.md](status/crimevid.md) | [crimevid/police.py](crimevid/police.py) |
+| click on a person → netra-ask accepted the launch | **0.8 s** | [status/launch.md](status/launch.md) | [tools/click_path_test.py](tools/click_path_test.py), `pytest tests/test_launch.py` |
+| click → first HMAC-signed launch at the drone receiver | **2.8 s** | [status/launch.md](status/launch.md) | [droplink/droplink.py](droplink/droplink.py), `pytest tests/test_droplink.py` |
+| person → coordinate error, leave-one-out median (test rig) | **7.2 m** | [status/calib.md](status/calib.md) | [hackdash/calib.py](hackdash/calib.py), `pytest tests/test_calib.py` |
+| PTZ command, browser → camera, median | **~0.5 s** | [status/ptz.md](status/ptz.md) | [ptzd/ptzd.py](ptzd/ptzd.py), `pytest tests/test_ptz.py tests/test_ptz_guard.py` |
+| GPU pod running detection + judge (RTX A5000) | **$0.27/h** | [status/cloud.md](status/cloud.md) | [cloud/](cloud/) |
+
+Run the tests: `pip install -r requirements.txt && pytest` (CI above runs the same on every push).
 
 ## What it does
 
@@ -40,7 +64,7 @@ flowchart LR
   HACK -. "PTZ commands (ptzd)" .-> CAM
 ```
 
-Text version:
+<details><summary>Text version</summary>
 
 ```
 camera (Axis Q6215-LE PTZ, webcams, any RTSP)
@@ -61,7 +85,9 @@ droplet (internal.netralabs.net)
 droplink       our drone receiver: verifies and logs exactly what a drone gets (the real drone link is next)
 ```
 
-## Results (measured today, real footage, no per-clip tuning)
+</details>
+
+## Details
 
 **Catching real crimes** — [`crimevid/`](crimevid/), videos in [`media/crimevid/`](media/crimevid/). Same judge code and
 default policy as the Jetson deployment; police are classified separately and never picked as the suspect.
@@ -105,6 +131,8 @@ free for the drone. Adding a camera = one stream entry.
 | `deploy/` | droplet install script, unit, nginx blocks |
 | `tools/` | end-to-end checks (click path, calibration round trip, PTZ) and `hagent` (spawn/steer agents in tmux) |
 | `plans/`, `ARCH.md` | the click-to-dispatch plan and the API contract the agents built against |
-| `briefs/`, `status/`, `COMMON.md` | how the agent team was run: one brief per agent, their reports, the shared rules |
+| `briefs/`, `status/`, `COMMON.md` | how the agent team was run: one brief per agent, their reports, the shared rules ([docs/how-we-built-it.md](docs/how-we-built-it.md)) |
+| `tests/`, `.github/workflows/` | unit tests (no network, no camera) and the CI that runs them |
+| [`AGENTS.md`](AGENTS.md), [`llms.txt`](llms.txt) | a map of the repo for AI reviewers |
 | `media/` | annotated crime videos and screenshots |
 
