@@ -1,0 +1,11 @@
+# Droplet: LL-HLS of the pod mediamtx (/hack/stream/). Run on the droplet as a transient unit Oct 24; install as a file to persist.
+# The pod's SSH port (-p) changes on every pod restart: update it here.
+[Unit]
+Description=SSH tunnel droplet 127.0.0.1:8460 -> cloud pod 127.0.0.1:8888
+After=network-online.target
+[Service]
+ExecStart=/usr/bin/ssh -N -i /root/.ssh/cloudedge_ed25519 -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=accept-new -p <POD_SSH_PORT> -L 127.0.0.1:8460:127.0.0.1:8888 root@63.141.33.141
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=multi-user.target

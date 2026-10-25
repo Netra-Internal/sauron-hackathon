@@ -50,7 +50,7 @@ $PY -c "import onnxruntime as o; o.preload_dlls(); print('ort', o.__version__, o
 set +x
 # the droplet's edge tunnel key (port-forward to edge-serve only), like netra-ask-edge-tunnel to the Jetson
 mkdir -p /root/.ssh; grep -qf cloud/pod/authorized_keys /root/.ssh/authorized_keys 2>/dev/null || cat cloud/pod/authorized_keys >> /root/.ssh/authorized_keys
-sed "s|@PUSH_PASS@|$PUSH_PASS|; s|@W@|$W|g" cloud/pod/mediamtx.yml > mediamtx.yml
+sed "s|@PUSH_PASS@|$PUSH_PASS|; s|@DEMO_PASS@|${DEMO_PASS:-$(openssl rand -hex 16)}|; s|@W@|$W|g" cloud/pod/mediamtx.yml > mediamtx.yml
 
 export PYTHONPATH=$W ASK_BACKEND=ort ASK_POSE=1 \
   ASK_ONNX_FULL=$W/models/yolo11s-1280.onnx ASK_ONNX_TILE=$W/models/yolo11s-640.onnx ASK_ONNX_POSE=$W/models/yolo11s-pose-320.onnx \
@@ -71,5 +71,7 @@ fi
 sleep 2
 keep supervise $PY -u cloud/pod/supervise.py &      # one edge per configured camera whose stream is live here
 keep serve $PY -u -m ask.edge.serve --bind 127.0.0.1 --port 8450 &
+# Jev dispatch watcher per camera in $DISPATCH_CAMS (needs TYPESAFE_API_KEY in the env or $W/dispatch.env)
+for c in ${DISPATCH_CAMS:-}; do setsid bash cloud/pod/dispatch.sh "$c" < /dev/null > /dev/null 2>&1 & done
 echo "== services up $(date -u)"
 wait
