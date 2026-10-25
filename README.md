@@ -78,6 +78,7 @@ free for the drone. Adding a camera = one stream entry.
 - Operator page: https://internal.netralabs.net/hack/ (internal login)
 - Crime results page: https://claude.ai/artifact/HAjU6Ncdn3FY9ci6hzzrrf
 - Plan: https://claude.ai/artifact/8a38tdLTnG5mTUDPUh82aa
+- Deck: https://claude.ai/artifact/DYN11dp3UtpFUi8ic2Pn7n (PDF in [`media/Sauron-Hackathon-Deck.pdf`](media/Sauron-Hackathon-Deck.pdf))
 
 ## Honest limits
 - The drone side is our receiver (droplink); wiring to the real drone (`sauron_link`, PX4) is next.
