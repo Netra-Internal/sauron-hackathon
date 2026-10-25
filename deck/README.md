@@ -13,3 +13,5 @@ Exports in William's Documents: `Sauron-Hackathon-Deck.pptx` / `.pdf`.
   The pptx text isn't editable; the page's own Export gives an editable one.
 
 Every number on the slides comes from `status/*.md` (sources listed in `status/deck.md`). No secrets in this folder.
+
+Note: this repo is public, so the repo copies of the slides show `<dashboard-host>/hack/` where the published deck shows the real dashboard address.
