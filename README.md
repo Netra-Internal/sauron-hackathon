@@ -1,5 +1,7 @@
 # Sauron — autonomous site security (Netra hackathon, Oct 24 2026)
 
+**Slides:** https://docs.google.com/presentation/d/1DFFL7WKfvFmFfGj1GIm5n_uDdgEpInlzHpR_xEo7hNI/edit?usp=sharing
+
 Sauron watches a site's cameras, decides when a person is doing something that matters, finds where they are on the
 map, and sends a drone to them. This repo is everything built for the hackathon in one day, by a team of Claude agents
 managed from tmux, on top of Netra's existing stack (netra-ask, the Jetson edge, the dispatch judge).
