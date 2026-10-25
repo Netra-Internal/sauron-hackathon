@@ -1,0 +1,48 @@
+<section id="arch" data-transition="fade" style="background:#14161B;color:#ECE7DD;font-family:'Space Grotesk', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:64px">
+<div style="display:flex;flex-direction:column;gap:20px">
+<p style="font-family:'IBM Plex Mono', 'Courier New', monospace;font-size:28px;letter-spacing:4px;text-transform:uppercase;color:#FF6A1A">Architecture</p>
+<h2 style="font-size:72px;font-weight:600;line-height:1.1">Capture at the edge, see in the cloud</h2>
+</div>
+<div style="display:flex;align-items:center;gap:16px">
+<div style="flex:1;display:flex;flex-direction:column;gap:10px;background:#0B0C0F;padding:28px;border:2px solid #3A3D45;border-radius:12px">
+<p style="font-family:'IBM Plex Mono', 'Courier New', monospace;font-size:24px;color:#8E887E">CAMERA</p>
+<h3 style="font-size:36px;font-weight:600">Axis PTZ · C920</h3>
+<p style="font-size:24px;line-height:1.35;color:#B3ACA0">RTSP, 1 s keyframes</p>
+</div>
+<x-connector style="width:48px;color:#FF6A1A;border-width:3px"></x-connector>
+<div style="flex:1;display:flex;flex-direction:column;gap:10px;background:#0B0C0F;padding:28px;border:2px solid #3A3D45;border-radius:12px">
+<p style="font-family:'IBM Plex Mono', 'Courier New', monospace;font-size:24px;color:#8E887E">EDGE</p>
+<h3 style="font-size:36px;font-weight:600">Jetson Orin</h3>
+<p style="font-size:24px;line-height:1.35;color:#B3ACA0">Capture and push only. GPU freed.</p>
+</div>
+<x-connector style="width:48px;color:#FF6A1A;border-width:3px"></x-connector>
+<div style="flex:1;display:flex;flex-direction:column;gap:10px;background:#2A1408;padding:28px;border:2px solid #FF6A1A;border-radius:12px">
+<p style="font-family:'IBM Plex Mono', 'Courier New', monospace;font-size:24px;color:#FF8A3D">GPU POD</p>
+<h3 style="font-size:36px;font-weight:600">RunPod A5000</h3>
+<p style="font-size:24px;line-height:1.35;color:#E3C9B4">Detection, tracking, video. $0.27/h</p>
+</div>
+<x-connector style="width:48px;color:#FF6A1A;border-width:3px"></x-connector>
+<div style="flex:1;display:flex;flex-direction:column;gap:10px;background:#0B0C0F;padding:28px;border:2px solid #3A3D45;border-radius:12px">
+<p style="font-family:'IBM Plex Mono', 'Courier New', monospace;font-size:24px;color:#8E887E">DROPLET</p>
+<h3 style="font-size:36px;font-weight:600">netra-ask</h3>
+<p style="font-size:24px;line-height:1.35;color:#B3ACA0">Sites, sitefuse, dispatch, relay</p>
+</div>
+<x-connector style="width:48px;color:#FF6A1A;border-width:3px"></x-connector>
+<div style="flex:1;display:flex;flex-direction:column;gap:16px">
+<div style="display:flex;flex-direction:column;gap:8px;background:#0B0C0F;padding:24px 28px;border:2px solid #3A3D45;border-radius:12px">
+<h3 style="font-size:32px;font-weight:600">/hack/ dashboard</h3>
+<p style="font-size:24px;line-height:1.35;color:#B3ACA0">Live video, boxes, Send drone</p>
+</div>
+<div style="display:flex;flex-direction:column;gap:8px;background:#0B0C0F;padding:24px 28px;border:2px solid #3A3D45;border-radius:12px">
+<h3 style="font-size:32px;font-weight:600">droplink</h3>
+<p style="font-size:24px;line-height:1.35;color:#B3ACA0">Signed drone receiver</p>
+</div>
+</div>
+</div>
+<div style="display:flex;gap:48px;border-top:2px solid #2A2D34;padding:32px 0px 0px 0px">
+<p style="font-size:28px;line-height:1.4;color:#B3ACA0;width:800px"><span style="color:#FF6A1A">Edge → cloud, moved today.</span> Cutover 22:19 UTC: the pod took over perception and posts to production through the relay.</p>
+<p style="font-size:28px;line-height:1.4;color:#B3ACA0;width:816px">Inference per frame at 5 fps: <span style="color:#ECE7DD">34–46 ms on the pod</span> vs 75–86 ms on the Jetson.</p>
+</div>
+<div style="position:absolute;left:128px;bottom:64px;width:1664px;display:flex;justify-content:space-between;font-family:'IBM Plex Mono', 'Courier New', monospace;font-size:24px;color:#8E887E"><p style="font-size:24px">SAURON · Netra</p><p style="font-size:24px">04</p></div>
+<aside>The cameras stream over RTSP to the Jetson, which now only captures and pushes. We moved perception off the Jetson to a RunPod A5000 at 27 cents an hour today; cutover was 22:19 UTC. The pod runs detection, tracking and the live video; it posts through a relay on the droplet into netra-ask, which runs sites, sitefuse and dispatch. The /hack/ dashboard and droplink, our signed drone receiver, hang off the droplet. Pod inference: 34 to 46 ms per frame for the C920, 40 to 43 ms for the Axis, vs 75 to 86 ms on the Jetson.</aside>
+</section>
