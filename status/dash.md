@@ -1,11 +1,15 @@
-DONE: Left pane removed; only while a drone is out (open incident) a compact "Drone sent → #id · located ±m · time" card with Abort drone sits over the video. Static files deployed WITHOUT restarting sauron-hack; hack-dash pushed — MANAGER: please merge hack-dash into main.
+DONE: Public-view middleware CANCELLED as asked. It had already been deployed (9b782a4) when the cancel arrived, so it is rolled back: hack-dash reverts it (3d3e056, pushed, redeployed), and the change is parked unmerged on branch hack-dash-public-view. MANAGER: hack-dash is safe to merge.
 
-- Branch hack-dash: 773e272 (code, contains origin/main) + screenshot commit, pushed.
-- Deploy: rsync hackdash/static/ -> /opt/netra/sauron-hack/hackdash/static/, chown netra; md5 of hack.js/hack.css/index.html match the branch. sauron-hack NOT restarted (ActiveEnterTimestamp 23:17:31 UTC is not mine). The page picks the new files up without a restart (index.html is read per request, asset URLs versioned by mtime).
-- Removed from the main page: the "Drones sent" history (incl. closed/dismissed), the incident detail view, the droplink message list (seq/signature/raw bodies), and the per-box "Incident" button. Tiny "Debug" link in the top bar -> /hack/api/incidents (raw JSON).
-- Layout: two columns (camera | Cameras list); the video gets the freed width (1268 px at a 1600 px window).
-- Verified on the real page with a read-only headless run (navigate, read DOM, screenshot; NO clicks, no PTZ): no left pane, live video playing (HLS), 1 person boxed, no drone card because no incident is open. plans/dash-live.png.
-- NOT verified live: the drone card itself (that needs an open incident; I did not launch a drone to test it).
+- Deployed app.py and calib.py now match the pre-change code (md5 checked). Straight to the app with no cookie, /hack/ -> 303 to login.
+- Through nginx, /hack/ and /hack/api/cameras -> 200 without a cookie. That is your shared public account, not my code.
+- The public view was live for about 3 minutes (9b782a4, deployed then reverted).
+- Also removed: the HACK_LAUNCH_USER/PASSWORD lines I had copied into /etc/sauron-hack.env from /root/hack-launch.pw. The file is back to its header comment only.
+- Branch hack-dash-public-view (9b782a4), NOT for main. It holds:
+  - reads public, writes behind login
+  - anonymous calib reads as hack_launch
+  - Send drone, Abort and Move camera disabled with "Sign in to control"
+  Delete the branch if it isn't wanted.
+
 
 ## Repo push
 PUSHED 1597371
