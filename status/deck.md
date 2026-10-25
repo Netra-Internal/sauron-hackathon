@@ -23,3 +23,11 @@ Speaker notes on every slide. Look: near-black, one ember accent (#FF6A1A), Spac
 ## Not done / notes
 - Only read files; no camera, droplet or other agents' files touched.
 - William must share it from the page's Share menu before anyone else can open it.
+
+## Repo push (manager: one repo for the whole project)
+PUSHED c849f68 (Netra-Internal/sauron-hackathon, branch hack-deck)
+- deck/: README.md, project/deck.json + project/slides/*.html (the deck's own source, 12 slides, speaker notes in <aside>),
+  img/ (the exact 5 images the deck shows: 4:25 PM /hack/ screenshot, calib-camera, 3 crime stills), export.py (headless Chromium
+  render -> PDF + picture pptx), .gitignore for its outputs.
+- Verified: `python deck/export.py deck` from the repo root builds 12 slides; output matches the files in Documents (same size; only the PDF timestamp differs).
+- Nothing deployed by deck; no units, nginx, env or secrets involved.
