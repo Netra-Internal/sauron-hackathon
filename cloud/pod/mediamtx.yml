@@ -5,7 +5,16 @@ api: yes
 apiAddress: 127.0.0.1:9997
 metrics: no
 rtmp: no
-hls: no
+# LL-HLS for browsers, loopback only: the droplet reaches it through its SSH tunnel and serves it at /hack/stream/<cam>/
+# behind the internal login. Always remuxing so the first picture is ready when a page opens.
+hls: yes
+hlsAddress: 127.0.0.1:8888
+hlsVariant: lowLatency
+hlsSegmentCount: 7
+hlsSegmentDuration: 1s
+hlsPartDuration: 200ms
+hlsAlwaysRemux: yes
+hlsAllowOrigin: '*'
 webrtc: no
 srt: no
 rtsp: yes
