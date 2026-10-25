@@ -4,8 +4,6 @@
 // Left: the incidents this demo launched (state, location, forwarded/delivered, what the drone received) + Abort.
 // Everything is polled from the real APIs under /hack/api; when a piece is missing the page says so and shows nothing.
 const API = "/hack/api";
-const LOGIN_URL = "/map/login?next=/hack/";
-const SIGNIN = `<a class="signin" href="${LOGIN_URL}">Sign in to control</a>`;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const h = html => { const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstElementChild; };
@@ -32,7 +30,6 @@ const post = (path, body) => api(path, { method: "POST", body: typeof body === "
 const rawTns = text => text.match(/"t_ns"\s*:\s*(\d+)/)?.[1];
 
 const S = {
-  user: undefined,                                // signed-in user; null = public view (reads only, controls disabled)
   cams: null, camErr: null, cam: null,            // camera list, its error, the open camera id
   gen: 0, live: null, liveErr: null, liveAt: 0,   // live loop generation, the payload on screen, its error
   inc: new Map(), incErr: null,
@@ -87,8 +84,7 @@ function renderWall() {
     t.querySelector(".tchips").append(cal);
     if (S.ptzCams?.has(c.camera_id)) {                                     // ptz.js
       const mv = h(`<span class="chip calib" role="button" title="Pan / tilt / zoom this camera by hand">Move camera</span>`);
-      mv.onclick = e => { e.stopPropagation(); if (S.user === null) location.href = LOGIN_URL; else openPtz(c.camera_id); };
-      if (S.user === null) { mv.textContent = "Move camera · sign in"; mv.title = "Sign in to control"; }
+      mv.onclick = e => { e.stopPropagation(); openPtz(c.camera_id); };
       t.querySelector(".tchips").append(mv);
     }
     wall.append(t);
@@ -108,7 +104,6 @@ function openPtz(cam) {
   const l = document.createElement("link"); l.rel = "stylesheet"; l.href = `/hack/static/ptz.css?v=${Date.now()}`; document.head.append(l);
   const s = document.createElement("script"); s.src = `/hack/static/ptz.js?v=${Date.now()}`; s.onload = () => window.Ptz.open(cam); document.head.append(s);
 }
-api("/health").then(r => { S.user = r.user || null; renderTop(); renderWall(); S.chips.forEach(el => el.dataset.html = ""); drawBoxes(); renderDrones(true); }).catch(() => {});
 api("/ptz").then(r => { S.ptzCams = new Set(r.map(c => c.camera_id)); renderWall(); renderTop(); }).catch(() => {});
 
 // ------------------------------------------------------------------ the open camera, live (centre)
@@ -313,7 +308,6 @@ function chipHTML(b, k, stale) {
   if (inc) acts = `<span class="sentlbl">drone sent</span>`;
   else if (p?.state === "confirm") acts = `<span>Send drone to ${esc(id)}?</span><button class="yes">Yes</button><button class="no">Cancel</button>`;
   else if (p?.state === "sending") acts = `<span>Sending…</span>`;
-  else if (S.user === null) acts = `<button class="send" disabled>Send drone</button>${SIGNIN}`;
   else acts = `<button class="send">Send drone</button>`;
   return `<div><span class="pid">${esc(id)}</span> ${fx(b.conf, 2)} · <span class="sus">${sus}</span>${stale ? ` <span class="sus">(last seen)</span>` : ""}</div>${why}<div class="acts">${acts}</div>`;
 }
@@ -360,9 +354,9 @@ async function pollIncidents() {
   } catch (err) { if (err.status !== 401) S.incErr = err.status === 404 ? "The launch API (hackdash.launch) isn't deployed yet." : `Couldn't load incidents: ${err.message}`; }
   renderDrones(); renderTop(); drawBoxes();
 }
-function renderDrones(force) {
+function renderDrones() {
   const box = $("#droneout"), open = [...S.inc.values()].filter(x => x.status !== "closed");
-  const key = open.map(x => `${x.id}|${x.edge_track}|${x.located}|${x.radius_m}`).join() + `|${S.user}`;
+  const key = open.map(x => `${x.id}|${x.edge_track}|${x.located}|${x.radius_m}`).join();
   if (box.dataset.key === key) return;            // unchanged: keep the button (and a click in flight)
   box.dataset.key = key; box.innerHTML = "";
   for (const x of open) {
@@ -374,8 +368,7 @@ function renderDrones(force) {
       try { const r = await post(`/incidents/${encodeURIComponent(x.id)}/abort`); toast(`Abort sent${r?.command_id ? `: command ${r.command_id}` : ""}`); await pollIncidents(); }
       catch (err) { if (err.status !== 401) toast(`Couldn't abort: ${err.message}`); ab.disabled = false; }
     });
-    if (S.user === null) { ab.disabled = true; card.append(ab, h(SIGNIN)); } else card.append(ab);
-    box.append(card);
+    card.append(ab); box.append(card);
   }
 }
 
@@ -392,10 +385,10 @@ function renderTop() {
   document.title = `${open ? `(${open}) ` : ""}Send drone · Netra`;
   // Move-camera buttons (ptz.js), only for PTZ cameras that are live
   const ptz = [...S.ptzCams || []].filter(id => camOf(id)?.live);
-  if (`${ptz}|${S.user}` === S.ptzShown) return;
-  S.ptzShown = `${ptz}|${S.user}`;
+  if (ptz.join() === S.ptzShown) return;
+  S.ptzShown = ptz.join();
   document.querySelectorAll("#topbar .ptzmove").forEach(e => e.remove());
-  for (const id of ptz) { const b = btn(`Move ${id}`, "ghost", () => S.user === null ? (location.href = LOGIN_URL) : openPtz(id)); b.classList.add("ptzmove"); if (S.user === null) b.title = "Sign in to control"; $("#topbar .grow").after(b); }
+  for (const id of ptz) { const b = btn(`Move ${id}`, "ghost", () => openPtz(id)); b.classList.add("ptzmove"); $("#topbar .grow").after(b); }
 }
 function tickClock() { $("#clock").textContent = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }); }
 

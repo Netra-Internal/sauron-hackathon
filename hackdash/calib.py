@@ -21,7 +21,6 @@ What is ours, and writes nothing:
 from __future__ import annotations
 
 import asyncio
-import base64
 import importlib.util
 import io
 import json
@@ -70,13 +69,7 @@ def _live():
 _client: httpx.AsyncClient | None = None
 
 
-# anonymous (public view) reads go to netra-ask as the hack_launch service account; writes never get here anonymous
-SERVICE_AUTH = "Basic " + base64.b64encode(f"{os.environ.get('HACK_LAUNCH_USER', '')}:{os.environ.get('HACK_LAUNCH_PASSWORD', '')}".encode()).decode()
-
-
 def auth_headers(req: Request) -> dict:
-    if not getattr(req.state, "user", None) and (req.method in ("GET", "HEAD") or req.url.path.endswith("/project")) and os.environ.get("HACK_LAUNCH_USER"):
-        return {"authorization": SERVICE_AUTH}
     return {k: req.headers[k] for k in ("cookie", "authorization") if k in req.headers}
 
 
