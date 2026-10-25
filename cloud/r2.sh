@@ -2,7 +2,7 @@
 # R2 (netra-lake) through the droplet's boto3 creds; the laptop has no rclone. Keys not starting with _work/ go under _work/sauron-cloud/.
 #   r2.sh put <key> < file      r2.sh get <key> > file      r2.sh url <key> [get|put] [ttl_s]      r2.sh ls [prefix]
 set -euo pipefail
-D=${DROPLET:?set DROPLET=root@<droplet>}
+D=${DROPLET:-${HACK_HOST:?set HACK_HOST=root@<droplet>}}
 op=$1; key=${2:-}; case $key in _work/*) ;; *) key=_work/sauron-cloud/$key ;; esac
 py='import boto3,os,sys
 s=boto3.client("s3",endpoint_url=os.environ["S3_ENDPOINT"],region_name="auto",aws_access_key_id=os.environ["S3_ACCESS_KEY_ID"],aws_secret_access_key=os.environ["S3_SECRET_ACCESS_KEY"])
