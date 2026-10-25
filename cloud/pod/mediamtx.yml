@@ -38,5 +38,12 @@ authInternalUsers:
     ips: []
     permissions:
       - action: publish
+  # one guest box (demo-node): may publish only its own path; password from $DEMO_PASS (random when unset)
+  - user: demo
+    pass: @DEMO_PASS@
+    ips: []
+    permissions:
+      - action: publish
+        path: jetson-c920
 paths:
   all_others:
