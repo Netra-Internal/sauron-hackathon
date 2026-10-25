@@ -74,16 +74,3 @@ free for the drone. Adding a camera = one stream entry.
 | `briefs/`, `status/`, `COMMON.md` | how the agent team was run: one brief per agent, their reports, the shared rules |
 | `media/` | annotated crime videos and screenshots |
 
-## Links (Netra internal)
-- Operator page: https://internal.netralabs.net/hack/ (internal login)
-- Crime results page: https://claude.ai/artifact/HAjU6Ncdn3FY9ci6hzzrrf
-- Plan: https://claude.ai/artifact/8a38tdLTnG5mTUDPUh82aa
-- Deck: https://claude.ai/artifact/DYN11dp3UtpFUi8ic2Pn7n (PDF in [`media/Sauron-Hackathon-Deck.pdf`](media/Sauron-Hackathon-Deck.pdf))
-
-## Honest limits
-- The drone side is our receiver (droplink); wiring to the real drone (`sauron_link`, PX4) is next.
-- Jev scores a clip and picks one suspect; other people have no suspicion score, and the page shows none.
-- Slow triggers (11–12 s) on two clips; the judge needs work on small/night figures.
-- The C920 numbers come from a desk test rig, not a deployed site.
-
-Team: Netra — Pranay Yalamanchali (CEO), Landon (CTO), William Stobaugh (COO).
