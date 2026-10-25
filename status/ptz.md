@@ -104,3 +104,7 @@ Latency, per command:
 - William is already using it (stops/snapshots from 69.196.39.231 in the sauron-hack log; camera pose changed).
 - The old autonomous tracker netra-ptz-axis on the laptop WSL is still running, but it can't reach the camera (the camera
   is on the Jetson now), so no conflict while it stays there.
+
+## Repo push (00:30 UTC)
+PUSHED 524e375 (hack-launch = origin/main 4e33b75 + 1 commit: droplink/README.md, ptzd/README.md, env templates with placeholders, ptzd/deployed/*.service). Everything I built or deployed today is on the branch: droplink/, ptzd/, hackdash/launch.py, hackdash/ptz.py, static/ptz.{js,css}, ptz_zoomcal.json, tools/click_path_test.py, ptz_test.py, ptz_shots.js, tests/test_{droplink,launch,ptz,ptz_guard}.py. Outside this repo: netra-internal branch hack-launch-next-ok @ 71d5695 (/hack in NEXT_OK).
+INCIDENT: at 00:27 the live /opt/netra/sauron-hack/hackdash/ptz.py was an OLD copy WITHOUT the operator-only guard (someone deployed a stale tree; main itself has the guard). I restored it from main (sha e5ca429e…, = main), restarted sauron-hack, and checked as hack_launch: move, stop, home, home/save and lock returned 403, and ptzd's command count stayed at 187 → 187 (zero camera commands). Stale copy saved at droplet /root/ptz.py.stale-*. WHOEVER DEPLOYS: deploy from current main and check `sha256sum hackdash/ptz.py` = e5ca429ee395d808….

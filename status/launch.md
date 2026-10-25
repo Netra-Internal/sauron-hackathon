@@ -74,3 +74,7 @@ netra-ask and sauron-hack also import common.auth (user_of only); they pick the 
 
 ## Earlier notes (droplink, launch.py design): see git log / hackdash/launch.py docstring
 - droplink.service 127.0.0.1:8510, /etc/droplink.env holds only DISPATCH_WEBHOOK_SECRET; sqlite /var/lib/droplink/messages.sqlite.
+
+## Repo push (00:30 UTC)
+PUSHED 524e375 (hack-launch = origin/main 4e33b75 + 1 commit: droplink/README.md, ptzd/README.md, env templates with placeholders, ptzd/deployed/*.service). Everything I built or deployed today is on the branch: droplink/, ptzd/, hackdash/launch.py, hackdash/ptz.py, static/ptz.{js,css}, ptz_zoomcal.json, tools/click_path_test.py, ptz_test.py, ptz_shots.js, tests/test_{droplink,launch,ptz,ptz_guard}.py. Outside this repo: netra-internal branch hack-launch-next-ok @ 71d5695 (/hack in NEXT_OK).
+INCIDENT: at 00:27 the live /opt/netra/sauron-hack/hackdash/ptz.py was an OLD copy WITHOUT the operator-only guard (someone deployed a stale tree; main itself has the guard). I restored it from main (sha e5ca429e…, = main), restarted sauron-hack, and checked as hack_launch: move, stop, home, home/save and lock returned 403, and ptzd's command count stayed at 187 → 187 (zero camera commands). Stale copy saved at droplet /root/ptz.py.stale-*. WHOEVER DEPLOYS: deploy from current main and check `sha256sum hackdash/ptz.py` = e5ca429ee395d808….

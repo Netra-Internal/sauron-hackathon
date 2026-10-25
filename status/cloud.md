@@ -1,4 +1,44 @@
-DONE (live video): LL-HLS for axis-q6215 is live at https://internal.netralabs.net/hack/stream/axis-q6215/index.m3u8 behind the /hack login; cold start 0.8-1.6 s, newest media 0-0.5 s behind the pod's receive clock. → DASH: switch the player to it (hls.js, lowLatencyMode).
+WORKING (demo-node + Jev on the pod): pod ready for a jetson-c920 push from demo-node (command below); Jev dispatch watchers running on the pod for axis-q6215 + jetson-c920, no verdict on /hack/ yet (nobody in view of the Axis; demo-node not pushing yet). LL-HLS still live at /hack/stream/axis-q6215/index.m3u8.
+
+## PUSHED 3bf8e87
+Branch hack-cloud, Netra-Internal/sauron-hackathon. Everything I built/deployed today is under `cloud/` (README: `cloud/README.md`):
+pod boot/mediamtx/supervisor/dispatch launcher/TRT build, box push + `push.env.example`, `demo-push.sh`, droplet tunnel units,
+nginx `/hack/stream/` snippet, shadow sink + compare tool, R2/stage scripts; plan `plans/cloud-edge.md`. Secrets are placeholders
+only (scanned: no push/demo password, Jev key or camera creds in the repo).
+
+## demo-node push (17:25 PDT)
+The pod accepts the push **directly on its public RTSPS port** (checked open from the internet: 63.141.33.141:22127, self-signed TLS),
+so demo-node needs only ffmpeg — no SSH key, no relay. Login `demo` is a new mediamtx user that may publish **only** path
+`jetson-c920` (cannot touch axis-q6215). **Paste-ready lines with the real password: `~/.config/netra/demo-node-push.txt`
+on the laptop (mode 600)** — the same as below with `<DEMO_PASS>` filled in:
+```
+# USB webcam (Linux):
+while true; do ffmpeg -hide_banner -loglevel warning -f v4l2 -input_format mjpeg -video_size 1920x1080 -i /dev/video0 -vf fps=5 -c:v libx264 -preset ultrafast -tune zerolatency -g 5 -b:v 1500k -maxrate 2M -bufsize 2M -pix_fmt yuv420p -an -f rtsp -rtsp_transport tcp "rtsps://demo:<DEMO_PASS>@63.141.33.141:22127/jetson-c920"; sleep 3; done
+# RTSP camera (stream copy; set the camera's keyframe interval to ~1 s):
+while true; do ffmpeg -hide_banner -loglevel warning -rtsp_transport tcp -i "rtsp://USER:PASS@CAMERA_IP/PATH" -map 0:v:0 -c copy -an -f rtsp -rtsp_transport tcp "rtsps://demo:<DEMO_PASS>@63.141.33.141:22127/jetson-c920"; sleep 3; done
+```
+(or `PASS=<DEMO_PASS> cloud/demo-push.sh /dev/video0|rtsp://...` from the repo). Notes:
+- Use a 16:9 source: jetson-c920 is configured 1920x1080 in sites.yaml and the edge scales to that (a 4:3 webcam would be stretched).
+  Change `/dev/video0` to the right device; if the webcam has no MJPEG mode drop `-input_format mjpeg`.
+- If demo-node's network blocks outbound port 22127 (the office network does), fall back to the droplet relay: they run
+  `ssh-keygen -t ed25519 -N "" -f ~/.ssh/cloudrelay_ed25519` and send me the `.pub`; I authorize it on `cloudrelay` and they add
+  `ssh -fN -i ~/.ssh/cloudrelay_ed25519 -L 127.0.0.1:18322:63.141.33.141:22127 cloudrelay@104.131.163.205` and push to `127.0.0.1:18322`.
+- RTSP pull instead: not viable — the tailnet path droplet→demo-node is DERP (lax, 121 ms, "direct connection not established").
+- Within 15 s of the stream arriving the pod's supervisor starts the jetson-c920 edge (boxes on /hack/), and the Jev watcher picks it
+  up (it retries every few s). Not tested end to end: I did not publish anything to jetson-c920 myself (no synthetic data).
+- If the pod restarts, the port changes (see `POD=` notes in plans/cloud-edge.md).
+
+## Jev dispatch on the pod (17:25 PDT)
+`ask.dispatch.watch --camera <cam> --gate on` (netra-ask 6417b5f, unmodified; = netra-dispatch@<cam>, live mode) runs on the pod for
+**axis-q6215** and **jetson-c920** (`cloud/pod/dispatch.sh`), reading `rtsp://127.0.0.1:8554/<cam>` (the pod's mediamtx, no extra camera
+session), person gate = YOLO11s 1280 ORT-CUDA, Jev key from the laptop's typesafe.env in `/workspace/edge/dispatch.env` (600), posting
+incidents/watch to `https://internal.netralabs.net/ask` with the worker token. No netra-dispatch runs on the Jetson, so no duplicates.
+- axis-q6215: running since 00:25:41 UTC, a strip every 2 s, all **gated** so far (no person in view), so Jev hasn't been called and
+  nothing is shown yet — /hack/ gets a label when Jev's verdict reaches watch/deploy. Cost: Jev only while someone is in view.
+- jetson-c920: waiting for demo-node's stream (404 from mediamtx until it arrives).
+- The mediamtx config reload for the `demo` user did not interrupt the Axis push or HLS (path stayed ready).
+- NO PTZ commands sent (nothing in this path talks to the camera except the one existing RTSP push).
+
 
 ## PTZ audit (William's rule, 16:08 PDT) — cloud sent NO PTZ commands, ever
 - Zero pan/tilt/zoom/home/preset/areazoom/day-night/VAPIX/ISAPI commands from me, in the last 15 min or at any time.
