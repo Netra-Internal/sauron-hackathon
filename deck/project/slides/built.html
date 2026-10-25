@@ -1,0 +1,40 @@
+<section id="built" data-transition="fade" style="background:#0B0C0F;color:#ECE7DD;font-family:'Space Grotesk', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:56px">
+<div style="display:flex;flex-direction:column;gap:20px">
+<p style="font-family:'IBM Plex Mono', 'Courier New', monospace;font-size:28px;letter-spacing:4px;text-transform:uppercase;color:#FF6A1A">Built today · Oct 24</p>
+<h2 style="font-size:72px;font-weight:600;line-height:1.1">From a camera pixel to a drone launch</h2>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:32px">
+<div style="display:flex;flex-direction:column;gap:12px;background:#14161B;padding:40px;border-left:4px solid #FF6A1A">
+<p style="font-family:'IBM Plex Mono', 'Courier New', monospace;font-size:28px;color:#FF6A1A">01</p>
+<h3 style="font-size:40px;font-weight:600">Live feeds</h3>
+<p style="font-size:28px;line-height:1.4;color:#B3ACA0">Axis PTZ and C920 stream to the cloud as low-latency video.</p>
+</div>
+<div style="display:flex;flex-direction:column;gap:12px;background:#14161B;padding:40px;border-left:4px solid #FF6A1A">
+<p style="font-family:'IBM Plex Mono', 'Courier New', monospace;font-size:28px;color:#FF6A1A">02</p>
+<h3 style="font-size:40px;font-weight:600">Person boxes</h3>
+<p style="font-size:28px;line-height:1.4;color:#B3ACA0">A GPU pod detects and tracks every person, drawn live on the video.</p>
+</div>
+<div style="display:flex;flex-direction:column;gap:12px;background:#14161B;padding:40px;border-left:4px solid #FF6A1A">
+<p style="font-family:'IBM Plex Mono', 'Courier New', monospace;font-size:28px;color:#FF6A1A">03</p>
+<h3 style="font-size:40px;font-weight:600">Sauron judge</h3>
+<p style="font-size:28px;line-height:1.4;color:#B3ACA0">Jev facts → policy → verdict: watch, deploy or urgent.</p>
+</div>
+<div style="display:flex;flex-direction:column;gap:12px;background:#14161B;padding:40px;border-left:4px solid #FF6A1A">
+<p style="font-family:'IBM Plex Mono', 'Courier New', monospace;font-size:28px;color:#FF6A1A">04</p>
+<h3 style="font-size:40px;font-weight:600">Map coordinate</h3>
+<p style="font-size:28px;line-height:1.4;color:#B3ACA0">A calibrated camera and sitefuse turn the person into lat/lon.</p>
+</div>
+<div style="display:flex;flex-direction:column;gap:12px;background:#14161B;padding:40px;border-left:4px solid #FF6A1A">
+<p style="font-family:'IBM Plex Mono', 'Courier New', monospace;font-size:28px;color:#FF6A1A">05</p>
+<h3 style="font-size:40px;font-weight:600">Send drone</h3>
+<p style="font-size:28px;line-height:1.4;color:#B3ACA0">Autonomous on a deploy verdict, or one click on a person box.</p>
+</div>
+<div style="display:flex;flex-direction:column;gap:12px;background:#14161B;padding:40px;border-left:4px solid #FF6A1A">
+<p style="font-family:'IBM Plex Mono', 'Courier New', monospace;font-size:28px;color:#FF6A1A">06</p>
+<h3 style="font-size:40px;font-weight:600">Signed launch</h3>
+<p style="font-size:28px;line-height:1.4;color:#B3ACA0">HMAC-signed incident to the drone, then a 1 Hz position stream.</p>
+</div>
+</div>
+<div style="position:absolute;left:128px;bottom:64px;width:1664px;display:flex;justify-content:space-between;font-family:'IBM Plex Mono', 'Courier New', monospace;font-size:24px;color:#8E887E"><p style="font-size:24px">SAURON · Netra</p><p style="font-size:24px">03</p></div>
+<aside>This is the whole chain we built today. Live camera feeds go to a GPU pod that boxes every person. The Sauron judge turns Jev’s facts into a verdict through the deployed policy. A calibrated camera plus sitefuse puts the person on the map. Then the drone gets a signed launch and a 1 Hz position stream. Launch is autonomous on a deploy verdict; the one-click Send drone is for the operator.</aside>
+</section>
