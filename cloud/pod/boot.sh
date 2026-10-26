@@ -25,6 +25,8 @@ ship() {   # logs every 60 s, shadow records every 5 min, to R2 (the pod has no 
 }
 ship &
 
+# a boot that cannot finish exits (ending the container) instead of idling as a billed pod with no edge
+fail() { echo "== BOOT FAILED $(date -u): $*"; tail -n 60 $W/logs/boot.log > $W/shipped.log; curl -s -X PUT -T $W/shipped.log "$LOG_PUT_URL" >/dev/null; exit 1; }
 get() { [ -s "$2" ] && return 0; curl -fsSL --retry 5 -o "$2.part" "$1" && mv -f "$2.part" "$2"; }
 set -x
 get "$CODE_URL" code.tgz && tar xzf code.tgz --no-same-owner                 # netra-ask ask/ at a pinned commit (git archive)
@@ -39,15 +41,17 @@ fi
 if [ ! -x bin/mediamtx ]; then
   curl -fsSL https://github.com/bluenviron/mediamtx/releases/download/v1.9.3/mediamtx_v1.9.3_linux_amd64.tar.gz | tar xz -C bin mediamtx
 fi
-if [ ! -d venv ]; then
+if [ ! -e venv/.ok ]; then
   python3 -m venv --system-site-packages venv
-  venv/bin/pip install -q "onnxruntime-gpu[cuda,cudnn]" opencv-python-headless numpy pyyaml tensorrt-cu12 cuda-python
+  venv/bin/pip install -q "onnxruntime-gpu[cuda,cudnn]" opencv-python-headless numpy pyyaml tensorrt-cu12 cuda-python && touch venv/.ok
 fi
 PY=$W/venv/bin/python
-$PY -c "import onnxruntime as o; o.preload_dlls(); print('ort', o.__version__, o.get_available_providers())"
+$PY -c "import onnxruntime as o; o.preload_dlls(); print('ort', o.__version__, o.get_available_providers())" || fail "onnxruntime"
 [ -s models/siglip-vision.engine ] || $PY cloud/pod/build_trt.py models/siglip-vision.onnx models/siglip-vision.engine
 [ -s tls.key ] || openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=netra-cloud-edge" -keyout tls.key -out tls.crt
 set +x
+for f in ask/edge/main.py cloud/pod/supervise.py models/yolo11s-1280.onnx models/yolo11s-640.onnx models/yolo11s-pose-320.onnx \
+         models/siglip-vision.engine bin/ffmpeg bin/mediamtx venv/.ok tls.key; do [ -s $f ] || [ -e $f -a $f = venv/.ok ] || fail "missing $f"; done
 # the droplet's edge tunnel key (port-forward to edge-serve only), like netra-ask-edge-tunnel to the Jetson
 mkdir -p /root/.ssh; grep -qf cloud/pod/authorized_keys /root/.ssh/authorized_keys 2>/dev/null || cat cloud/pod/authorized_keys >> /root/.ssh/authorized_keys
 sed "s|@PUSH_PASS@|$PUSH_PASS|; s|@DEMO_PASS@|${DEMO_PASS:-$(openssl rand -hex 16)}|; s|@W@|$W|g" cloud/pod/mediamtx.yml > mediamtx.yml
