@@ -9,6 +9,8 @@
 #   env (/etc/netra-cloud-push.env): STREAMS="jetson-c920=rtsp://127.0.0.1:8556/c920 [id=url ...]"  POD=ip:port
 #        PUSH_PASS  RELAY=cloudrelay@<droplet>  RELAY_KEY=~/.ssh/cloudrelay_ed25519 (no passphrase; the droplet
 #        restricts it to port-forwarding to POD)  WIFI_IF=wlP1p1s0  EDGE_FFMPEG=/opt/ffmpeg/ffmpeg
+#        PUSH_VCODEC (optional, default "-c copy"): video args for a camera whose stream is too big for the uplink,
+#        e.g. "-vf fps=10 -c:v h264_v4l2m2m -b:v 1500k -g 10 -bf 0 -pix_fmt yuv420p" (Pi 4 hardware encoder)
 set -u
 FF=${EDGE_FFMPEG:-/opt/ffmpeg/ffmpeg}; WIFI_IF=${WIFI_IF:-wlP1p1s0}; RELAY=${RELAY:?set RELAY=cloudrelay@<droplet>}
 LPORT=${LPORT:-18322}; RELAY_IP=${RELAY#*@}
@@ -27,7 +29,7 @@ while true; do
         IFS='|' read -ra srcs <<< "$src"
         for one in "${srcs[@]}"; do
           echo "$(date -u +%T) $cam trying ${one//:*@/://***@}"
-          "$FF" -hide_banner -loglevel warning -nostdin -rtsp_transport tcp -timeout 5000000 -i "$one" -map 0:v:0 -c copy -an \
+          "$FF" -hide_banner -loglevel warning -nostdin -rtsp_transport tcp -timeout 5000000 -i "$one" -map 0:v:0 ${PUSH_VCODEC:--c copy} -an \
                 -f rtsp -rtsp_transport tcp "rtsps://pusher:${PUSH_PASS}@127.0.0.1:$LPORT/$cam"
           echo "$(date -u +%T) $cam push from ${one//:*@/://***@} exited $?"
         done
