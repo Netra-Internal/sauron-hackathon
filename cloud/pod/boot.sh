@@ -75,7 +75,8 @@ fi
 sleep 2
 keep supervise $PY -u cloud/pod/supervise.py &      # one edge per configured camera whose stream is live here
 keep serve $PY -u -m ask.edge.serve --bind 127.0.0.1 --port 8450 &
-# Jev dispatch watcher per camera in $DISPATCH_CAMS (needs TYPESAFE_API_KEY in the env or $W/dispatch.env)
-for c in ${DISPATCH_CAMS:-}; do setsid bash cloud/pod/dispatch.sh "$c" < /dev/null > /dev/null 2>&1 & done
+# Jev dispatch watcher per camera in $DISPATCH_CAMS + $W/dispatch_cams (needs TYPESAFE_API_KEY in the env or $W/dispatch.env).
+# The file adds cameras without update-pod (an env change restarts the container and RunPod remaps its public ports).
+for c in $(echo ${DISPATCH_CAMS:-} $(cat $W/dispatch_cams 2>/dev/null) | tr ' ' '\n' | sort -u); do setsid bash cloud/pod/dispatch.sh "$c" < /dev/null > /dev/null 2>&1 & done
 echo "== services up $(date -u)"
 wait
