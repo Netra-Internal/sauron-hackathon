@@ -1,0 +1,8 @@
+# /etc/default/netra-node-wifi-watchdog — overrides for node/pi/netra-node-wifi-watchdog
+#IFACES="wlan0 wlan1"   # default: every wifi device NetworkManager knows
+#RECONNECT_MIN=2          # minutes one interface is offline before a NetworkManager disconnect+connect of it (repeats)
+#REBOOT_MIN=10            # minutes with NO Wi-Fi interface online before a reboot
+#MIN_REBOOT_GAP_MIN=30    # never two watchdog reboots closer than this (timestamp in /boot/firmware)
+#DRY_REBOOT=0             # 1 = log "would REBOOT" instead (testing)
+#CHECK_URL=http://connectivitycheck.gstatic.com/generate_204
+#PING_HOSTS="1.1.1.1 8.8.8.8"

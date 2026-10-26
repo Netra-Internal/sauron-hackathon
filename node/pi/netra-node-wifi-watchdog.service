@@ -1,0 +1,8 @@
+[Unit]
+Description=demo-node Wi-Fi watchdog (reconnect a Wi-Fi interface after 2 min offline; reboot after 10 min with none online, max 1 per 30 min)
+After=NetworkManager.service
+RequiresMountsFor=/boot/firmware
+[Service]
+Type=oneshot
+TimeoutStartSec=150
+ExecStart=/usr/local/sbin/netra-node-wifi-watchdog

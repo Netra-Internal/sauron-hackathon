@@ -1,0 +1,7 @@
+[Unit]
+Description=Report demo-node liveness, boot and power state to the droplet nodeguard (Tailscale)
+After=network-online.target tailscaled.service
+[Service]
+Type=oneshot
+TimeoutStartSec=80
+ExecStart=/usr/local/sbin/netra-node-report

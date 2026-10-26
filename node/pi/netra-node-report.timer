@@ -1,0 +1,8 @@
+[Unit]
+Description=demo-node report every minute
+[Timer]
+OnBootSec=20s
+OnUnitInactiveSec=1min
+AccuracySec=5
+[Install]
+WantedBy=timers.target

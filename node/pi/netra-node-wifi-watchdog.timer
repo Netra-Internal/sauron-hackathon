@@ -1,0 +1,8 @@
+[Unit]
+Description=demo-node Wi-Fi watchdog every minute
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=1min
+AccuracySec=5
+[Install]
+WantedBy=timers.target

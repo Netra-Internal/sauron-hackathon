@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# netra-node-report (demo-node, 2026-10-26): every minute, tell the droplet's nodeguard receiver (over Tailscale)
+# that this Pi is alive, which boot it is on, and its power/thermal state. The droplet keeps the timeline and does the
+# alerting (node/droplet/nodeguard.py); this side keeps nothing, so it works on the read-only overlay root.
+#   boot_id + uptime_s  -> the droplet derives boot time and the previous boot's length (the Pi has no RTC)
+#   throttled           -> vcgencmd get_throttled (bit 0/16 = under-voltage now/since boot)
+#   wd_last_reboot      -> Wi-Fi watchdog's last reboot stamp (/boot/firmware), so a watchdog reboot is told apart
+#   public_ip           -> this node's public IPs, one per Wi-Fi interface: lets the droplet match the push
+#                          tunnel's ssh session to this node (cached 15 min)
+# env (/etc/netra-node-report.env, root 0600): NODEGUARD_URL=http://<droplet-tailscale-ip>:8790/report NODEGUARD_TOKEN
+set -u
+. /etc/netra-node-report.env
+NODE=${NODE:-$(hostname)}
+ipf=/run/netra-node-report.public_ip
+if [ ! -s $ipf ] || [ $(( $(date +%s) - $(stat -c %Y $ipf) )) -ge 900 ]; then   # one per Wi-Fi interface, space-separated
+  ips=""; for i in $(nmcli -t -f DEVICE,TYPE dev 2>/dev/null | awk -F: '$2=="wifi"{print $1}'); do
+    ip=$(curl -s -m 8 --interface "$i" https://api.ipify.org); [[ $ip =~ ^[0-9.]+$ ]] && [[ " $ips " != *" $ip "* ]] && ips="$ips $ip"
+  done
+  [ -n "$ips" ] && echo "${ips# }" > $ipf
+fi
+thr=$(vcgencmd get_throttled 2>/dev/null | cut -d= -f2); thr=${thr:-0x0}
+temp=$(awk '{printf "%.1f", $1/1000}' /sys/class/thermal/thermal_zone0/temp 2>/dev/null || echo 0)
+read -r l1 l5 _ < /proc/loadavg
+rssi=$(awk -v i="${IF:-wlan0}:" '$1==i{gsub(/\./,"",$4); print $4+0}' /proc/net/wireless 2>/dev/null)
+wd=$(cat /boot/firmware/netra-wifi-watchdog/last_reboot 2>/dev/null || echo 0)
+synced=$([ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" = yes ] && echo true || echo false)
+push=$(systemctl is-active -q netra-cloud-push && echo true || echo false)
+body=$(printf '{"node":"%s","boot_id":"%s","uptime_s":%s,"throttled":"%s","load1":%s,"load5":%s,"temp_c":%s,"public_ip":"%s","wd_last_reboot":%s,"clock_synced":%s,"rssi_dbm":%s,"push_active":%s}' \
+  "$NODE" "$(cat /proc/sys/kernel/random/boot_id)" "$(cut -d' ' -f1 /proc/uptime)" "$thr" "$l1" "$l5" "$temp" \
+  "$(cat $ipf 2>/dev/null)" "$wd" "$synced" "${rssi:-0}" "$push")
+curl -sS -m 25 --retry 2 --retry-delay 5 -H "Authorization: Bearer $NODEGUARD_TOKEN" -H 'Content-Type: application/json' \
+  --data "$body" "$NODEGUARD_URL" >/dev/null

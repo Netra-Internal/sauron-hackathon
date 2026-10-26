@@ -1,0 +1,11 @@
+[Unit]
+Description=nodeguard receiver: Pi reports over Tailscale only
+After=tailscaled.service
+Wants=tailscaled.service
+[Service]
+EnvironmentFile=/etc/netra-nodeguard.env
+ExecStart=/usr/bin/python3 /opt/netra/nodeguard/nodeguard.py serve
+Restart=always
+RestartSec=10
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# netra-node-wifi-watchdog (demo-node, Pi 4 on UCSD-GUEST Wi-Fi, 2026-10-26). Runs every minute from a systemd timer.
+# Wi-Fi is the node's only uplink: onboard wlan0 plus, since Oct 26, a USB MT7921 (wlan1), both on UCSD-GUEST.
+# Each Wi-Fi interface in IFACES (default: every wifi device NetworkManager knows) is checked on its own:
+#   one interface without internet for RECONNECT_MIN (2) min : NetworkManager disconnect + connect of THAT interface,
+#                                                               again every RECONNECT_MIN while it stays down
+#   NO interface with internet for REBOOT_MIN (10) min      : reboot, but never more than one watchdog reboot per
+#                                                               MIN_REBOOT_GAP_MIN (30) min
+# "Internet" = an HTTP 204 from CHECK_URL or a ping to PING_HOSTS, forced out of that interface (a captive portal
+# answers 200/302, so it counts as down). The gateway's ARP state is logged for diagnosis only (UCSD drops ICMP to it).
+# Outage state lives in /run (tmpfs: a reboot starts a fresh 10 min). The last watchdog reboot time is persisted
+# in /boot/firmware, which stays writable under the read-only overlay root. The Pi has no RTC, so after a boot
+# without Wi-Fi the clock can be behind that timestamp: then uptime is used (the last reboot was at least uptime ago).
+# Adapted from netra-ptz tools/wifi/netra-wifi-watchdog (Jetson RTL8822CE): state helpers, own capped log, NM rearm.
+set -u
+[ -f /etc/default/netra-node-wifi-watchdog ] && . /etc/default/netra-node-wifi-watchdog
+IFACES=${IFACES:-$(nmcli -t -f DEVICE,TYPE dev 2>/dev/null | awk -F: '$2=="wifi"{printf "%s ", $1}')}
+RECONNECT_MIN=${RECONNECT_MIN:-2}; REBOOT_MIN=${REBOOT_MIN:-10}; MIN_REBOOT_GAP_MIN=${MIN_REBOOT_GAP_MIN:-30}
+DRY_REBOOT=${DRY_REBOOT:-0}
+CHECK_URL=${CHECK_URL:-http://connectivitycheck.gstatic.com/generate_204}
+PING_HOSTS=${PING_HOSTS:-"1.1.1.1 8.8.8.8"}
+STATE=${STATE:-/run/netra-node-wifi}; PERSIST=${PERSIST:-/boot/firmware/netra-wifi-watchdog}
+LOG=${LOG:-/var/log/netra-node-wifi-watchdog.log}
+mkdir -p "$STATE" "$PERSIST"
+log(){ logger -t netra-node-wifi "$*"; echo "$(date -Is) $*" >> "$LOG"; echo "$*"; }
+get(){ cat "$STATE/$1" 2>/dev/null || echo "${2:-0}"; }
+put(){ echo "$2" > "$STATE/$1"; }
+[ "$(stat -c %s "$LOG" 2>/dev/null || echo 0)" -gt 1000000 ] && { tail -n 2000 "$LOG" > "$LOG.tmp"; mv "$LOG.tmp" "$LOG"; }
+
+# `nmcli radio wifi off` disables the watchdog (maintenance)
+if [ "$(nmcli -t radio wifi 2>/dev/null)" != "enabled" ]; then put down_since 0; exit 0; fi
+
+online(){   # $1 = interface
+  [ "$(curl -s -o /dev/null -w '%{http_code}' --interface "$1" -m 10 "$CHECK_URL" 2>/dev/null)" = 204 ] && return 0
+  for h in $PING_HOSTS; do ping -I "$1" -c 2 -W 3 -q "$h" >/dev/null 2>&1 && return 0; done
+  return 1
+}
+describe(){   # $1 = interface -> "wlan0 connected, gateway 100.x arp REACHABLE"
+  local gw st gwok
+  gw=$(ip -4 route show default dev "$1" 2>/dev/null | awk '{print $3; exit}')
+  gwok=$([ -n "$gw" ] && ip neigh show "$gw" dev "$1" 2>/dev/null | awk '{print "arp", $NF}')
+  st=$(nmcli -t -f DEVICE,STATE dev 2>/dev/null | awk -F: -v i="$1" '$1==i{print $2}')
+  echo "$1 ${st:-missing}, gateway ${gw:-none} $gwok"
+}
+reconnect(){   # $1 = interface, $2 = why
+  log "DOWN: $2 -> reconnecting $1"
+  nmcli device set "$1" autoconnect yes 2>/dev/null
+  nmcli device disconnect "$1" >/dev/null 2>&1; sleep 2
+  # a manual disconnect blocks autoconnect until an explicit connect (seen on the Jetson)
+  if nmcli -w 45 device connect "$1" >/dev/null 2>&1; then
+    log "$1 reconnected ($(nmcli -g GENERAL.CONNECTION dev show "$1" 2>/dev/null)); internet $(online "$1" && echo back || echo 'still down')"
+  else
+    log "$1 connect attempt failed"
+  fi
+}
+
+now=$(date +%s); up=${TEST_UPTIME:-$(cut -d. -f1 /proc/uptime)}
+IFACES=$(echo $IFACES); [ -n "$IFACES" ] || IFACES="wlan0"   # NM gave nothing: still track the onboard radio so a reboot can happen
+any=0; downs=""
+for i in $IFACES; do
+  if online "$i"; then
+    any=1
+    s0=$(get "down_since.$i")
+    [ "$s0" != 0 ] && log "online again over $i after $(( (now - s0) / 60 )) min"
+    put "down_since.$i" 0; put "last_reconnect.$i" 0
+  else
+    s0=$(get "down_since.$i"); [ "$s0" = 0 ] && { s0=$now; put "down_since.$i" $now; }
+    downs="$downs $i"
+  fi
+done
+
+# the whole node: no interface with internet
+if [ $any = 1 ]; then
+  since=$(get down_since)
+  [ "$since" != 0 ] && log "node online again after $(( (now - since) / 60 )) min"
+  put down_since 0
+else
+  since=$(get down_since); [ "$since" = 0 ] && { since=$now; put down_since $now; }
+  down_min=$(( (now - since) / 60 ))
+  why="no internet on any Wi-Fi ($IFACES) for ${down_min} min: $(for i in $IFACES; do printf '%s; ' "$(describe "$i")"; done)"
+  if [ "$down_min" -ge "$REBOOT_MIN" ]; then
+    last=$(cat "$PERSIST/last_reboot" 2>/dev/null || echo 0)
+    gap=$(( now - last )); [ "$gap" -lt "$up" ] && gap=$up   # clock behind (no RTC, no NTP yet): uptime is a floor
+    if [ "$gap" -lt $((MIN_REBOOT_GAP_MIN * 60)) ]; then
+      [ "$(get suppress_logged)" = "$since" ] || { log "DOWN: $why -> reboot suppressed (last watchdog reboot $((gap / 60)) min ago < $MIN_REBOOT_GAP_MIN)"; put suppress_logged "$since"; }
+    elif [ "$DRY_REBOOT" = 1 ]; then
+      log "DOWN: $why -> would REBOOT now (DRY_REBOOT=1)"
+    else
+      log "DOWN: $why -> REBOOTING"
+      echo "$now" > "$PERSIST/last_reboot.tmp" && mv "$PERSIST/last_reboot.tmp" "$PERSIST/last_reboot"
+      { echo "$(date -Is) reboot: $why"; tail -n 49 "$PERSIST/reboots.log" 2>/dev/null || true; } > "$PERSIST/reboots.tmp" &&
+        mv "$PERSIST/reboots.tmp" "$PERSIST/reboots.log"
+      sync; systemctl reboot; exit 0
+    fi
+  fi
+fi
+
+# reconnect each interface that has been down RECONNECT_MIN, then again every RECONNECT_MIN while it stays down
+for i in $downs; do
+  d=$(( (now - $(get "down_since.$i")) / 60 ))
+  if [ "$d" -ge "$RECONNECT_MIN" ] && [ $((now - $(get "last_reconnect.$i"))) -ge $((RECONNECT_MIN * 60)) ]; then
+    put "last_reconnect.$i" "$now"
+    reconnect "$i" "no internet over $i for $d min ($(describe "$i"))"
+  fi
+done
+exit 0
