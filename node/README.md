@@ -35,14 +35,38 @@ video to the cloud pod. This directory keeps it running unattended and records w
 - Event kinds: node, video, tunnel, boot, throttle, note (hand-added corrections). Reserved: `power` (`v`, `a`) for an
   INA226 on the Pi's I2C. The Pi would add v/a to its report and `step()` would log threshold crossings. Not built.
 
+## Night schedule (approved by William, Oct 26)
+OFF Mon–Fri 01:00–06:00 San Diego time (the nights of Sun..Thu). Fri and Sat nights stay on.
+- **(A) live:** `pi/netra-night-schedule apply`, from `netra-night-schedule.timer`. The timer fires at
+  `Mon..Fri 01:00 America/Los_Angeles`, at `Mon..Fri 06:00 America/Los_Angeles`, and 15 s after boot.
+  - Inside the window it stops `netra-cloud-push`; outside it, it makes sure the push runs.
+  - The Pi stays up.
+  - The timezone is part of the calendar spec because the Pi's own zone is Europe/London.
+- **(B) staged, DISABLED:** `netra-night-poweroff.timer` runs a clean `systemctl poweroff` at `Mon..Fri 00:58
+  America/Los_Angeles`. The script refuses to power off outside Mon–Fri 00:50–01:00.
+  It needs a 12 V 7-day timer switch between the low-voltage cutoff and camera+Pi, set to OFF 01:00 and ON 06:00
+  Mon–Fri. The switch's 06:00 power-on is the only thing that boots the Pi again.
+  Enable it, only once the switch is confirmed (writes the SD layer and the live system):
+  ```
+  ssh netra@demo-node 'sudo overlayroot-chroot systemctl enable netra-night-poweroff.timer && sudo systemctl enable --now netra-night-poweroff.timer'
+  ```
+  Undo: the same command with `disable`.
+- **(C) droplet:** `SCHEDULE_OFF="Mon-Fri 01:00-06:00 America/Los_Angeles"` in `/etc/netra-nodeguard.env`.
+  - From 00:55 to 06:15 local, outages are logged with `"scheduled": true` and not posted. The window opens 5 min
+    early to cover the 00:58 poweroff.
+  - The timeline shows the window start and end.
+  - Anything still down at 06:15 is posted once, with a mention ("NOT back after the scheduled night off"). Its
+    recovery is posted without a mention.
+  - Outages outside the window alert as before.
+
 ## Install
 Pi (before enabling the overlay, or into the lower layer after):
 ```
-sudo install -m 755 pi/netra-node-wifi-watchdog pi/netra-node-report /usr/local/sbin/
-sudo install -m 644 pi/netra-node-*.service pi/netra-node-*.timer /etc/systemd/system/
+sudo install -m 755 pi/netra-node-wifi-watchdog pi/netra-node-report pi/netra-night-schedule /usr/local/sbin/
+sudo install -m 644 pi/netra-node-*.service pi/netra-node-*.timer pi/netra-night-*.service pi/netra-night-*.timer /etc/systemd/system/
 sudo install -m 644 pi/netra-node-wifi-watchdog.default /etc/default/netra-node-wifi-watchdog
 sudo install -m 600 <filled pi/netra-node-report.env.example> /etc/netra-node-report.env
-sudo systemctl daemon-reload && sudo systemctl enable --now netra-node-wifi-watchdog.timer netra-node-report.timer
+sudo systemctl daemon-reload && sudo systemctl enable --now netra-node-wifi-watchdog.timer netra-node-report.timer netra-night-schedule.timer   # NOT netra-night-poweroff.timer
 ```
 Droplet:
 ```

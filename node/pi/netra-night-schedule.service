@@ -1,0 +1,6 @@
+[Unit]
+Description=demo-node night schedule: video push off Mon-Fri 01:00-06:00 America/Los_Angeles
+After=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/netra-night-schedule apply

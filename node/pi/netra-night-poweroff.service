@@ -1,0 +1,5 @@
+[Unit]
+Description=demo-node scheduled poweroff before the 12 V timer switch cuts power (Mon-Fri 00:58)
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/netra-night-schedule poweroff

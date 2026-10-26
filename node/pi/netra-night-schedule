@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# netra-night-schedule (demo-node, 2026-10-26; approved by William). Weeknight power saving, San Diego local time:
+# OFF Mon-Fri 01:00-06:00 (the nights of Sun..Thu). Fri and Sat nights stay on.
+#   apply     (A, live)  : inside the window stop netra-cloud-push, outside it make sure it runs. Runs at 01:00 and 06:00
+#                          (netra-night-schedule.timer) and 15 s after every boot, so a reboot inside the window stays off.
+#                          The Pi itself stays up: without the hardware timer switch a halted Pi never comes back.
+#   poweroff  (B, staged): clean `systemctl poweroff` at 00:58 (netra-night-poweroff.timer, installed DISABLED). Only for
+#                          when William's 12 V 7-day timer switch (OFF 01:00, ON 06:00, Mon-Fri) is installed between the
+#                          low-voltage cutoff and camera+Pi: the switch's 06:00 power-on is what boots the Pi again.
+# The droplet (node/droplet/nodeguard.py, SCHEDULE_OFF) logs this window as "scheduled off" and alerts only if the node
+# is not back by 06:15.
+set -u
+TZ_LOCAL=${TZ_LOCAL:-America/Los_Angeles}; SYSTEMCTL=${SYSTEMCTL:-systemctl}   # tests: TEST_NOW=<date -d spec>, SYSTEMCTL=echo
+now=$(date +%s ${TEST_NOW:+-d "$TEST_NOW"})
+dow=$(TZ=$TZ_LOCAL date -d @$now +%u); hm=$(TZ=$TZ_LOCAL date -d @$now +%H%M); hm=$((10#$hm))   # 1=Mon..7=Sun, HHMM
+in_window(){ [ "$dow" -le 5 ] && [ "$hm" -ge 100 ] && [ "$hm" -lt 600 ]; }
+log(){ logger -t netra-night "$*"; echo "$*"; }
+case "${1:-}" in
+  apply)
+    if in_window; then
+      systemctl is-active -q netra-cloud-push && log "scheduled off window ($(TZ=$TZ_LOCAL date -d @$now '+%a %H:%M %Z')): stopping netra-cloud-push"
+      $SYSTEMCTL stop netra-cloud-push
+    else
+      systemctl is-active -q netra-cloud-push || { log "outside the off window ($(TZ=$TZ_LOCAL date -d @$now '+%a %H:%M %Z')): starting netra-cloud-push"; $SYSTEMCTL start netra-cloud-push; }
+    fi ;;
+  poweroff)
+    # only in the 00:50-01:00 Mon-Fri slot the timer is for: a stray manual start must not halt a Pi nothing will power on
+    if [ "$dow" -le 5 ] && [ "$hm" -ge 50 ] && [ "$hm" -lt 100 ]; then
+      log "scheduled poweroff before the 01:00 timer-switch cut"; sync; $SYSTEMCTL poweroff
+    else
+      log "poweroff refused: $(TZ=$TZ_LOCAL date -d @$now '+%a %H:%M %Z') is not Mon-Fri 00:50-01:00"; exit 1
+    fi ;;
+  *) echo "usage: $0 apply|poweroff" >&2; exit 2 ;;
+esac

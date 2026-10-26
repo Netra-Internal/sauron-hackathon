@@ -21,6 +21,8 @@ Observations per check:
 
 Event log: append-only JSONL, one object per line: {"t": ISO-8601 UTC, "node", "kind", "state", ...details}.
   kinds: node (online|offline), video (up|down), tunnel (up|down), boot (booted), throttle (bits),
+         schedule (off-window|on-window|not-back: the approved night off, SCHEDULE_OFF; node/video rows inside it
+         carry "scheduled": true and are not posted),
          note (state "manual", {"text"}: a hand-added annotation; the log is never edited, corrections are appended).
   Reserved for later, not written yet: kind "power" with {"v": volts, "a": amps} from an INA226 on the Pi's I2C. The
   Pi would add v/a to its report and step() would log a row when it crosses a threshold. The format needs no change.
@@ -51,6 +53,13 @@ VIDEO_DOWN_AFTER_S = int(os.environ.get("VIDEO_DOWN_AFTER_S", "180"))
 REPORT_FRESH_S = int(os.environ.get("REPORT_FRESH_S", "180"))
 RELAY_USER = os.environ.get("RELAY_USER", "cloudrelay")
 UV_BITS = (1 << 0) | (1 << 16)   # under-voltage now / since boot
+# Approved night off (William, Oct 26): "Mon-Fri 01:00-06:00 America/Los_Angeles" (days = the mornings). Inside it, plus
+# QUIET_EARLY_MIN before (the staged poweroff runs at 00:58) and until BACK_BY_MIN after, outages are logged as
+# scheduled and not posted; whatever is still down when that ends is posted once, with a mention ("NOT back").
+SCHEDULE_OFF = os.environ.get("SCHEDULE_OFF", "")
+QUIET_EARLY_MIN = int(os.environ.get("QUIET_EARLY_MIN", "5"))
+BACK_BY_MIN = int(os.environ.get("BACK_BY_MIN", "15"))
+DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
 def now_utc() -> dt.datetime:
@@ -80,6 +89,36 @@ def throttled_text(bits: int) -> str:
     return f"0x{bits:x}" + (f" ({', '.join(on)})" if on else " (clean)")
 
 
+def parse_schedule(spec: str):
+    """"Mon-Fri 01:00-06:00 America/Los_Angeles" -> (weekdays {0..6}, start, end, tz); "" -> None. Same-day windows only."""
+    if not spec.strip():
+        return None
+    from zoneinfo import ZoneInfo
+    days, hours, tz = spec.split()
+    d0, _, d1 = days.partition("-")
+    i0, i1 = DAYS.index(d0), DAYS.index(d1 or d0)
+    wd = {i % 7 for i in range(i0, i1 + 1 + (7 if i1 < i0 else 0))}
+    a, b = (dt.time.fromisoformat(x) for x in hours.split("-"))
+    if not a < b:
+        raise ValueError(f"SCHEDULE_OFF must not cross midnight: {spec}")
+    return wd, a, b, ZoneInfo(tz)
+
+
+def quiet(now: dt.datetime, spec: str | None = None) -> bool:
+    """Inside the scheduled-off window, widened by QUIET_EARLY_MIN before and BACK_BY_MIN after."""
+    sch = parse_schedule(SCHEDULE_OFF if spec is None else spec)
+    if not sch:
+        return False
+    wd, a, b, tz = sch
+    loc = now.astimezone(tz)
+    if loc.weekday() not in wd:
+        return False
+    day = loc.date()
+    start = dt.datetime.combine(day, a, tz) - dt.timedelta(minutes=QUIET_EARLY_MIN)
+    end = dt.datetime.combine(day, b, tz) + dt.timedelta(minutes=BACK_BY_MIN)
+    return start <= loc < end
+
+
 # ---------------------------------------------------------------- pure state machine (tested in tests/test_nodeguard.py)
 
 def step(state: dict, obs: dict, now: dt.datetime) -> tuple[dict, list[dict], list[tuple[str, bool]]]:
@@ -99,6 +138,10 @@ def step(state: dict, obs: dict, now: dt.datetime) -> tuple[dict, list[dict], li
     rep = obs.get("report")
     rep_age = (now - parse(rep["received_at"])).total_seconds() if rep else None
     alive = bool(obs.get("ts_ok")) or (rep_age is not None and rep_age <= REPORT_FRESH_S)
+    q = quiet(now)
+    if q != bool(st.get("quiet")):
+        event("schedule", "off-window" if q else "on-window", schedule=SCHEDULE_OFF)
+        st["quiet"] = q
 
     # node online / offline (debounced going down, immediate coming back)
     if alive:
@@ -106,8 +149,9 @@ def step(state: dict, obs: dict, now: dt.datetime) -> tuple[dict, list[dict], li
         if st.get("node") != "online":
             if st.get("node") == "offline":
                 down_s = (now - parse(st["node_since"])).total_seconds()
-                event("node", "online", outage_s=int(down_s))
-                posts.append((f"🟢 {NODE} back ONLINE after {dur(down_s)} offline", False))
+                event("node", "online", outage_s=int(down_s), **({"scheduled": True} if st.get("node_sched") else {}))
+                if st.get("node_posted", True):   # recoveries only for outages that were posted
+                    posts.append((f"🟢 {NODE} back ONLINE after {dur(down_s)} offline", False))
             else:
                 event("node", "online", first=True)
             st["node"], st["node_since"] = "online", iso(now)
@@ -115,29 +159,45 @@ def step(state: dict, obs: dict, now: dt.datetime) -> tuple[dict, list[dict], li
         last_ok = parse(st.get("node_last_ok") or iso(now))
         st.setdefault("node_last_ok", iso(last_ok))
         if st.get("node") != "offline" and (now - last_ok).total_seconds() >= OFFLINE_AFTER_S:
-            event("node", "offline", last_seen=iso(last_ok))
-            posts.append((f"🔴 {NODE} OFFLINE: no Tailscale reply and no report since {iso(last_ok)} "
-                          f"(last report: {_rep_line(st.get('last_report'))})", True))
-            st["node"], st["node_since"] = "offline", iso(last_ok)
+            event("node", "offline", last_seen=iso(last_ok), **({"scheduled": True} if q else {}))
+            if not q:
+                posts.append((f"🔴 {NODE} OFFLINE: no Tailscale reply and no report since {iso(last_ok)} "
+                              f"(last report: {_rep_line(st.get('last_report'))})", True))
+            st["node"], st["node_since"], st["node_sched"], st["node_posted"] = "offline", iso(last_ok), q, not q
 
     # video up / down from feed_health
     if obs.get("video_ok"):
         if st.get("video") != "up":
             if st.get("video") == "down":
                 down_s = (now - parse(st["video_since"])).total_seconds()
-                event("video", "up", outage_s=int(down_s))
-                posts.append((f"🟢 {NODE} video recovered ({CAMERA}) after {dur(down_s)}", False))
+                event("video", "up", outage_s=int(down_s), **({"scheduled": True} if st.get("video_sched") else {}))
+                if st.get("video_posted", True):
+                    posts.append((f"🟢 {NODE} video recovered ({CAMERA}) after {dur(down_s)}", False))
             else:
                 event("video", "up", first=True)
             st["video"], st["video_since"] = "up", iso(now)
     elif st.get("video") != "down":
         # obs video_ok=False already means "no fps>0 row for VIDEO_DOWN_AFTER_S"; the outage starts at the last good row
         since = parse(obs["video_last_ok"]) if obs.get("video_last_ok") else now - dt.timedelta(seconds=VIDEO_DOWN_AFTER_S)
-        event("video", "down", camera=CAMERA)
+        event("video", "down", camera=CAMERA, **({"scheduled": True} if q else {}))
         node_word = "node online" if alive else "node also unreachable"
         tun = {True: "push tunnel up", False: "push tunnel DOWN", None: "push tunnel unknown"}[obs.get("tunnel_ok")]
-        posts.append((f"🔴 {NODE} video DOWN: no {CAMERA} frames analysed since {iso(since)} ({node_word}, {tun})", True))
-        st["video"], st["video_since"] = "down", iso(since)
+        if not q:
+            posts.append((f"🔴 {NODE} video DOWN: no {CAMERA} frames analysed since {iso(since)} ({node_word}, {tun})", True))
+        st["video"], st["video_since"], st["video_sched"], st["video_posted"] = "down", iso(since), q, not q
+
+    # the scheduled-off window is over (BACK_BY_MIN after its end) and something is still down: say so, once
+    if not q:
+        late = [w for k, w in (("node", "OFFLINE"), ("video", "DOWN"))
+                if st.get(k) in ("offline", "down") and not st.get(f"{k}_posted", True)]
+        if late:
+            event("schedule", "not-back", down=[w.lower() for w in late])
+            posts.append((f"🔴 {NODE} NOT back after the scheduled night off ({SCHEDULE_OFF}): "
+                          + ", ".join(f"{k} {w} since {st[k + '_since']}" for k, w in
+                                      (("node", "OFFLINE"), ("video", "DOWN")) if w in late), True))
+            for k in ("node", "video"):
+                if st.get(k) in ("offline", "down"):
+                    st[f"{k}_posted"] = True
 
     # push tunnel (logged only; the video alert covers its effect)
     tun = obs.get("tunnel_ok")
@@ -353,12 +413,17 @@ def timeline(events: list[dict], since: dt.datetime, now: dt.datetime) -> list[s
         if t < since:
             continue
         k, s = e["kind"], e["state"]
+        sched = "  [scheduled off]" if e.get("scheduled") else ""
         if k in ("node", "video") and s in ("online", "up"):
-            line = f"{k} {s}" + (f"   (was down {dur(e['outage_s'])})" if "outage_s" in e else "   (first observation)")
+            line = f"{k} {s}" + (f"   (was down {dur(e['outage_s'])})" if "outage_s" in e else "   (first observation)") + sched
         elif k == "node" and s == "offline":
-            line = f"node OFFLINE   (last seen {e['last_seen'][11:19]}Z)"
+            line = f"node OFFLINE   (last seen {e['last_seen'][11:19]}Z)" + sched
         elif k == "video" and s == "down":
-            line = "video DOWN"
+            line = "video DOWN" + sched
+        elif k == "schedule":
+            line = {"off-window": "-- scheduled night off begins (alerts muted)",
+                    "on-window": "-- scheduled night off over (alerts on)",
+                    "not-back": f"!! NOT back after scheduled off: {', '.join(e.get('down', []))}"}.get(s, f"schedule {s}")
         elif k == "boot":
             prev = f", previous boot ran {dur(e['prev_uptime_s'])}" if "prev_uptime_s" in e else ""
             line = f"BOOT at {e['booted_at'][:19]}Z{prev}, cause {e.get('cause', 'unknown')}, throttled {e.get('throttled')}"
@@ -376,7 +441,8 @@ def timeline(events: list[dict], since: dt.datetime, now: dt.datetime) -> list[s
     total = {}
     for e in events:
         if e["kind"] in ("node", "video") and "outage_s" in e and parse(e["t"]) >= since:
-            total[e["kind"]] = total.get(e["kind"], 0) + e["outage_s"]
+            key = e["kind"] + (" (scheduled)" if e.get("scheduled") else "")
+            total[key] = total.get(key, 0) + e["outage_s"]
     out.append("   closed outages in window: " + (", ".join(f"{k} {dur(v)}" for k, v in total.items()) or "none"))
     return out
 

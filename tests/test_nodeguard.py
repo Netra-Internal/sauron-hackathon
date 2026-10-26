@@ -103,3 +103,75 @@ def test_boot_without_watchdog_stamp_is_not_the_watchdog():
                           (3, {"ts_ok": True, "video_ok": True,
                                "report": rep(T0 + dt.timedelta(minutes=3), BOOT_B, 60, wd_last_reboot=0)})])
     assert [e for e in evs if e["kind"] == "boot"][1]["cause"].startswith("not the watchdog")
+
+
+# ---- approved night off: Mon-Fri 01:00-06:00 San Diego time (PDT = UTC-7 in these dates)
+SCHED = "Mon-Fri 01:00-06:00 America/Los_Angeles"
+
+
+def night(day_utc, video_back_utc=None, node_off=None, node_back_utc=None):
+    """Minute checks 07:30-14:00 UTC on day_utc. Video stops at 08:00 UTC (01:00 PDT, push stopped) or at node_off;
+    it comes back at video_back_utc. node_off/node_back_utc: the Pi itself is off (staged poweroff)."""
+    ng.SCHEDULE_OFF = SCHED
+    try:
+        st, evs, posts = {}, [], []
+        t = dt.datetime.combine(day_utc, dt.time(7, 30), dt.timezone.utc)
+        stop = node_off or dt.datetime.combine(day_utc, dt.time(8, 0), dt.timezone.utc)
+        last_frame = None
+        while t <= dt.datetime.combine(day_utc, dt.time(14, 0), dt.timezone.utc):
+            video = t < stop or (video_back_utc is not None and t >= video_back_utc)
+            last_frame = t if video else last_frame
+            alive = not (node_off and node_off <= t and (node_back_utc is None or t < node_back_utc))
+            obs = {"ts_ok": alive, "video_ok": video, "video_last_ok": ng.iso(last_frame)}
+            st, e, p = ng.step(st, obs, t)
+            evs += e
+            posts += p
+            t += dt.timedelta(minutes=1)
+        return st, evs, posts
+    finally:
+        ng.SCHEDULE_OFF = ""
+
+
+def at(day, hh, mm):
+    return dt.datetime.combine(day, dt.time(hh, mm), dt.timezone.utc)
+
+
+TUE = dt.date(2026, 10, 27)
+SAT = dt.date(2026, 10, 31)
+
+
+def test_quiet_window_edges_in_local_time():
+    for t, want in [(at(TUE, 7, 54), False), (at(TUE, 7, 55), True), (at(TUE, 13, 14), True), (at(TUE, 13, 15), False),
+                    (at(SAT, 9, 0), False), (at(dt.date(2026, 11, 2), 9, 0), True),   # Mon after DST ends: 01:00 PST
+                    (at(dt.date(2026, 11, 2), 8, 30), False)]:
+        assert ng.quiet(t, SCHED) is want, t
+
+
+def test_scheduled_night_back_on_time_posts_nothing_and_logs_scheduled():
+    st, evs, posts = night(TUE, video_back_utc=at(TUE, 13, 2))
+    assert posts == []
+    v = [e for e in evs if e["kind"] == "video"]
+    assert [x["state"] for x in v][-2:] == ["down", "up"] and v[-1]["scheduled"] and v[-2]["scheduled"]
+    assert [e["state"] for e in evs if e["kind"] == "schedule"] == ["off-window", "on-window"]
+
+
+def test_not_back_by_0615_alerts_once_with_mention_then_recovery_without():
+    st, evs, posts = night(TUE, video_back_utc=at(TUE, 13, 40))
+    late = [p for p in posts if "NOT back" in p[0]]
+    assert len(late) == 1 and late[0][1] is True and "video DOWN" in late[0][0]
+    rec = [p for p in posts if "video recovered" in p[0]]
+    assert len(rec) == 1 and rec[0][1] is False
+    assert len(posts) == 2
+
+
+def test_weekend_night_alerts_as_usual():
+    st, evs, posts = night(SAT, video_back_utc=at(SAT, 13, 2))
+    assert [p[1] for p in posts if "video DOWN" in p[0]] == [True]
+    assert not [e for e in evs if e.get("scheduled")]
+
+
+def test_staged_poweroff_night_node_off_and_back_is_quiet():
+    st, evs, posts = night(TUE, video_back_utc=at(TUE, 13, 3), node_off=at(TUE, 7, 58), node_back_utc=at(TUE, 13, 1))
+    assert posts == []
+    off = [e for e in evs if e["kind"] == "node" and e["state"] == "offline"]
+    assert off and off[0]["scheduled"]

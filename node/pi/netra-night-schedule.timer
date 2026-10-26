@@ -1,0 +1,9 @@
+[Unit]
+Description=demo-node night schedule (push off Mon-Fri 01:00, on 06:00, San Diego time; also re-applied at boot)
+[Timer]
+OnCalendar=Mon..Fri 01:00 America/Los_Angeles
+OnCalendar=Mon..Fri 06:00 America/Los_Angeles
+OnBootSec=15s
+AccuracySec=1s
+[Install]
+WantedBy=timers.target

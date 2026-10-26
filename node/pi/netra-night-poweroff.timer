@@ -1,0 +1,9 @@
+# STAGED, DISABLED. Enable only once William confirms the 12 V 7-day timer switch (OFF 01:00, ON 06:00, Mon-Fri) is
+# installed; see node/README.md for the one command (it must write the lower layer of the overlay root too).
+[Unit]
+Description=demo-node poweroff Mon-Fri 00:58 America/Los_Angeles (needs the hardware timer switch to power on at 06:00)
+[Timer]
+OnCalendar=Mon..Fri 00:58 America/Los_Angeles
+AccuracySec=1s
+[Install]
+WantedBy=timers.target
