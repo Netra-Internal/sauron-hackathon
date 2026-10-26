@@ -34,6 +34,10 @@ the default route moves to lte0 (25 MB/h cap) every push is killed until Wi-Fi i
 **Pod ports move on every container restart** (RunPod remaps them: 22159/22160 became 22155/22156). The relay rule
 allows any port on the pod IP; after a restart update `POD=` in each box's push env (and the droplet tunnel's `-p`).
 A stable endpoint for production = keep the pod running, or front it with a fixed host.
+Finding the new IP/ports (the RunPod v2 API's get-pod does not return them): `ssh <pod-id>-<n>@ssh.runpod.io` (proxy, from
+get-pod `ssh.proxy`) and read `RUNPOD_PUBLIC_IP`, `RUNPOD_TCP_PORT_22`, `RUNPOD_TCP_PORT_8322` from the env. Then update the
+droplet's `netra-ask-cloud-tunnel` / `netra-cloud-hls-tunnel` unit files (`-p`, host), the `cloudrelay` `permitopen=` IP,
+and each box's push target. The pod also needs `/workspace/edge/ask_url` (relay) and `dispatch.env` (Jev key) on a new volume.
 
 ## Latency budget (vs today's p50 1.04 s)
 Extra hop: Jetson (Chicago) → droplet (NYC) → pod (Montreal), TCP, ≈ 30-60 ms one way + one more decode on the pod.
