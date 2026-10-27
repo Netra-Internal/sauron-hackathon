@@ -237,15 +237,16 @@ def step(state: dict, obs: dict, now: dt.datetime) -> tuple[dict, list[dict], li
             st["uv_posted_boot"] = rep["boot_id"]
         st["last_report"] = rep
 
-    # the Pi's Tailscale watchdog acted (node/pi/netra-node-tailscale-watchdog): log each new action once
-    if rep and rep.get("ts_wd") and rep["ts_wd"] != st.get("ts_wd_seen"):
-        at, _, text = rep["ts_wd"].partition("|")
+    # the Pi's Tailscale watchdog acted (node/pi/netra-node-tailscale-watchdog): log each action once, by its epoch.
+    # Reports can arrive out of order (one retried through a tailscaled restart), so only a NEWER epoch counts.
+    at, _, text = (rep or {}).get("ts_wd", "").partition("|")
+    if at.isdigit() and int(at) > int(st.get("ts_wd_epoch", 0)):
         kind = "needs-login" if text.startswith("NeedsLogin") else "restarted" if text.startswith("restarted") else "action"
-        when = iso(dt.datetime.fromtimestamp(int(at), dt.timezone.utc)) if at.isdigit() else None
+        when = iso(dt.datetime.fromtimestamp(int(at), dt.timezone.utc))
         event("tailscale", kind, at=when, text=text)
         if kind != "action":
             posts.append((f"{'⚠️' if kind == 'needs-login' else '🔧'} {NODE} Tailscale watchdog: {text}", kind == "needs-login"))
-        st["ts_wd_seen"] = rep["ts_wd"]
+        st["ts_wd_epoch"] = int(at)
     return st, ev, posts
 
 

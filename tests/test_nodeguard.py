@@ -186,3 +186,13 @@ def test_tailscale_watchdog_action_logged_once_and_posted():
     assert [p[1] for p in posts if "Tailscale watchdog" in p[0]] == [False]
     st, evs, posts = run([(0, {"ts_ok": True, "video_ok": True, "report": rep(T0, ts_wd="1793120060|NeedsLogin: node key expired")})])
     assert [p[1] for p in posts if "NeedsLogin" in p[0]] == [True]
+
+
+def test_tailscale_action_out_of_order_report_not_relogged():
+    a = "1793122023|restarted tailscaled (A)"
+    b = "1793122080|restarted tailscaled (B)"
+    seq = [b, a, b, b]   # what the droplet actually received on Oct 27 17:28-17:31
+    st, evs, posts = run([(m, {"ts_ok": True, "video_ok": True, "report": rep(T0 + dt.timedelta(minutes=m), ts_wd=x)})
+                          for m, x in enumerate(seq)])
+    assert [e["text"] for e in evs if e["kind"] == "tailscale"] == ["restarted tailscaled (B)"]
+
