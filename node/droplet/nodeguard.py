@@ -12,7 +12,8 @@ The droplet does the watching because a dead Pi cannot report its own death.
 Observations per check:
   node   : `tailscale ping` to the node, or a Pi report received in the last REPORT_FRESH_S.
            OFFLINE only after OFFLINE_AFTER_S of both failing (DERP-relayed pings drop now and then).
-  tunnel : an established sshd session of the relay account whose peer IP is one of the node's public IPs (its report).
+  tunnel : the Pi's report says its push ssh has an established connection to the relay (tunnel_up). Not checked from
+           the droplet: UCSD-GUEST changes the public NAT IP under a live session, so matching sessions by IP was wrong.
   video  : feed_health has a row with fps_analysed > 0 for the camera in the last VIDEO_DOWN_AFTER_S.
   boot   : a new boot_id in the Pi's report. booted_at = received_at - uptime (the Pi has no RTC, so its own clock
            is not trusted). prev_uptime_s = the last uptime the previous boot reported (accurate to ~1 report).
@@ -51,7 +52,6 @@ STATE = STATE_DIR / "state.json"
 OFFLINE_AFTER_S = int(os.environ.get("OFFLINE_AFTER_S", "180"))
 VIDEO_DOWN_AFTER_S = int(os.environ.get("VIDEO_DOWN_AFTER_S", "180"))
 REPORT_FRESH_S = int(os.environ.get("REPORT_FRESH_S", "180"))
-RELAY_USER = os.environ.get("RELAY_USER", "cloudrelay")
 UV_BITS = (1 << 0) | (1 << 16)   # under-voltage now / since boot
 # Approved night off (William, Oct 26): "Mon-Fri 01:00-06:00 America/Los_Angeles" (days = the mornings). Inside it, plus
 # QUIET_EARLY_MIN before (the staged poweroff runs at 00:58) and until BACK_BY_MIN after, outages are logged as
@@ -256,23 +256,6 @@ def tailscale_ok(host: str) -> bool:
         return False
 
 
-def tunnel_ok(public_ip: str | None) -> bool | None:
-    """An established sshd session of RELAY_USER from one of the node's public IPs (space-separated, one per Wi-Fi
-    interface). None when they are not known yet."""
-    if not public_ip:
-        return None
-    pids = subprocess.run(["pgrep", "-u", RELAY_USER, "-x", "sshd"], capture_output=True, text=True).stdout.split()
-    pids += subprocess.run(["pgrep", "-f", f"^sshd(-session)?: {RELAY_USER}"], capture_output=True, text=True).stdout.split()
-    if not pids:
-        return False
-    out = subprocess.run(["ss", "-tnpH", "state", "established", "( sport = :22 )"], capture_output=True, text=True).stdout
-    for line in out.splitlines():
-        peer = line.split()[3] if len(line.split()) > 3 else ""
-        if peer.rsplit(":", 1)[0] in public_ip.split() and any(f"pid={p}," in line for p in pids):
-            return True
-    return False
-
-
 def video_last_ok() -> dt.datetime | None:
     """received_at of the newest feed_health row with fps_analysed > 0 (last 7 days), by the droplet's clock."""
     sql = (f"select extract(epoch from max(received_at)) from feed_health where camera_id='{CAMERA}' "
@@ -319,7 +302,9 @@ def cmd_check(_args) -> int:
         state = {}
     rep = last_report()
     obs = {"ts_ok": tailscale_ok(os.environ.get("NODE_TS_HOST", NODE)), "report": rep,
-           "tunnel_ok": tunnel_ok((rep or {}).get("public_ip"))}
+           # the push tunnel as the Pi sees it; unknown without a fresh report (old reporters have no tunnel_up)
+           "tunnel_ok": rep.get("tunnel_up") if rep and "tunnel_up" in rep and
+           (now_utc() - parse(rep["received_at"])).total_seconds() <= REPORT_FRESH_S else None}
     now = now_utc()
     try:
         last = video_last_ok()
@@ -348,7 +333,7 @@ def cmd_check(_args) -> int:
 # ---------------------------------------------------------------- receiver (Pi -> droplet over Tailscale)
 
 FIELDS = {"node": str, "boot_id": str, "uptime_s": (int, float), "throttled": str, "load1": (int, float),
-          "load5": (int, float), "temp_c": (int, float), "public_ip": str, "wd_last_reboot": (int, str),
+          "load5": (int, float), "temp_c": (int, float), "tunnel_up": bool, "wd_last_reboot": (int, str),
           "clock_synced": bool, "rssi_dbm": (int, float), "push_active": bool}
 
 
