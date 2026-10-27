@@ -1,0 +1,21 @@
+[Unit]
+Description=Big Brother: Discord ops bot (William's @mentions in the private alert channel -> claude -p with read tools + allowlisted fixes)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# root: reads nodeguard state (root 700), restarts droplet units, ssh key in /var/lib/netra-bigbrother/ssh.
+# Claude itself gets no built-in tools, only the bigbrother MCP server (bigbrother/brain.py).
+WorkingDirectory=/opt/netra/bigbrother
+# CLAUDE_CODE_OAUTH_TOKEN (shared with netra-map); root-only bot env: DISCORD_BOT_TOKEN, DISCORD_CHANNEL_ID, DISCORD_MENTION_USER_ID
+EnvironmentFile=/etc/netra-map.env
+EnvironmentFile=/etc/netra-bigbrother.env
+Environment=HOME=/var/lib/netra-bigbrother/home
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/netra/bigbrother/.venv/bin/python -m bigbrother.bot
+Restart=always
+RestartSec=10
+MemoryMax=900M
+
+[Install]
+WantedBy=multi-user.target
