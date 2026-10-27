@@ -1,0 +1,8 @@
+[Unit]
+Description=demo-node Tailscale watchdog every minute
+[Timer]
+OnBootSec=3min
+OnUnitInactiveSec=1min
+AccuracySec=5
+[Install]
+WantedBy=timers.target

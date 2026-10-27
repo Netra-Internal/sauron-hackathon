@@ -35,6 +35,34 @@ video to the cloud pod. This directory keeps it running unattended and records w
 - Event kinds: node, video, tunnel, boot, throttle, note (hand-added corrections). Reserved: `power` (`v`, `a`) for an
   INA226 on the Pi's I2C. The Pi would add v/a to its report and `step()` would log threshold crossings. Not built.
 
+## Tailscale: never go dark (Oct 27)
+- **Watchdog** (`pi/netra-node-tailscale-watchdog` + timer, every minute).
+  - Unhealthy means BackendState is not Running, or the droplet is unreachable over the tailnet: no TCP answer from
+    the nodeguard receiver and no `tailscale ping`.
+  - If that lasts 3 min while the internet works, it restarts tailscaled, at most once per 10 min.
+  - If tailscaled comes back Stopped (`tailscale down`), it runs `tailscale up --accept-dns=false --hostname=demo-node`
+    (this node's non-default prefs, so nothing else changes).
+  - NeedsLogin (an expired key) cannot be fixed here. It is reported and posted with a mention.
+  - Each action reaches the droplet's event log as kind `tailscale` (`ts_wd` in the report). Restarts are posted
+    without a mention.
+- **Fallback access without Tailscale** (`pi/netra-node-revssh.service`): a persistent `ssh -N -R
+  127.0.0.1:2201:127.0.0.1:22` from the Pi to the droplet, as account `noderev`.
+  - **noderev:** a system user with a nologin shell. Its key is `restrict,port-forwarding,permitlisten="127.0.0.1:2201"`.
+    `droplet/sshd-70-noderev.conf` limits it to remote forwarding of that one port and sets ClientAliveInterval 15 x 3,
+    so a dead session frees the port.
+  - **Key and host:** the Pi key is `/home/netra/.ssh/noderev_ed25519`. The droplet host lives in a unit drop-in on the
+    Pi (`netra-node-revssh.service.d/host.conf`), not in git. cloudrelay is not used.
+  - **Getting in:**
+    ```
+    ssh -J root@<droplet> -p 2201 -o HostKeyAlias=demo-node-rev netra@127.0.0.1
+    ```
+  - **Droplet setup:**
+    `useradd --system --home-dir /var/lib/noderev --create-home --shell /usr/sbin/nologin noderev`, then
+    `/var/lib/noderev/.ssh/authorized_keys` (root:noderev 640) holding `restrict,port-forwarding,permitlisten="127.0.0.1:2201" <pi pubkey>`,
+    then `droplet/sshd-70-noderev.conf` into `/etc/ssh/sshd_config.d/`, then `sshd -t && systemctl reload ssh`.
+- **Overlay:** tailscaled is enabled in the SD layer, and `tailscaled.state` there is identical to the running one.
+  The node rejoins after a reboot without re-auth.
+
 ## Night schedule: built, currently ALL OFF (William, Oct 27)
 Design: OFF Mon–Fri 01:00–06:00 San Diego time (the nights of Sun..Thu); Fri and Sat nights stay on.
 It ran once as designed on the night of Oct 26→27. On Oct 27 William turned it **off** until the 12 V timer switch is
@@ -68,11 +96,11 @@ in place of `enable --now`, and `s|^SCHEDULE_OFF=|#SCHEDULE_OFF=|`.
 ## Install
 Pi (before enabling the overlay, or into the lower layer after):
 ```
-sudo install -m 755 pi/netra-node-wifi-watchdog pi/netra-node-report pi/netra-night-schedule /usr/local/sbin/
+sudo install -m 755 pi/netra-node-wifi-watchdog pi/netra-node-report pi/netra-node-tailscale-watchdog pi/netra-night-schedule /usr/local/sbin/
 sudo install -m 644 pi/netra-node-*.service pi/netra-node-*.timer pi/netra-night-*.service pi/netra-night-*.timer /etc/systemd/system/
 sudo install -m 644 pi/netra-node-wifi-watchdog.default /etc/default/netra-node-wifi-watchdog
 sudo install -m 600 <filled pi/netra-node-report.env.example> /etc/netra-node-report.env
-sudo systemctl daemon-reload && sudo systemctl enable --now netra-node-wifi-watchdog.timer netra-node-report.timer   # night-* timers: see "Night schedule"
+sudo systemctl daemon-reload && sudo systemctl enable --now netra-node-wifi-watchdog.timer netra-node-report.timer netra-node-tailscale-watchdog.timer netra-node-revssh.service   # revssh needs its host.conf drop-in; night-* timers: see "Night schedule"
 ```
 Droplet:
 ```

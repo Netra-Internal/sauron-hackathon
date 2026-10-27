@@ -175,3 +175,14 @@ def test_staged_poweroff_night_node_off_and_back_is_quiet():
     assert posts == []
     off = [e for e in evs if e["kind"] == "node" and e["state"] == "offline"]
     assert off and off[0]["scheduled"]
+
+
+def test_tailscale_watchdog_action_logged_once_and_posted():
+    act = "1793120000|restarted tailscaled (BackendState Running, droplet UNREACHABLE for 3 min) -> BackendState Running"
+    steps = [(m, {"ts_ok": True, "video_ok": True, "report": rep(T0 + dt.timedelta(minutes=m), ts_wd=act)}) for m in range(3)]
+    st, evs, posts = run(steps)
+    ts = [e for e in evs if e["kind"] == "tailscale"]
+    assert len(ts) == 1 and ts[0]["state"] == "restarted" and ts[0]["at"].startswith("2026-10-27")
+    assert [p[1] for p in posts if "Tailscale watchdog" in p[0]] == [False]
+    st, evs, posts = run([(0, {"ts_ok": True, "video_ok": True, "report": rep(T0, ts_wd="1793120060|NeedsLogin: node key expired")})])
+    assert [p[1] for p in posts if "NeedsLogin" in p[0]] == [True]

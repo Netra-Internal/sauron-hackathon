@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# netra-node-tailscale-watchdog (demo-node, 2026-10-27; William: "no way we go dark on Tailscale"). Every minute.
+# Unhealthy = `tailscale status --json` BackendState is not Running (or the CLI cannot reach tailscaled), or the
+# droplet is unreachable over the tailnet (no TCP answer from the nodeguard receiver and no `tailscale ping`).
+# Unhealthy for BAD_MIN (3) min while the internet works over Wi-Fi -> restart tailscaled, at most once per
+# RESTART_GAP_MIN (10) min. If it then comes back Stopped (someone ran `tailscale down`), bring it up with this node's
+# own flags (TS_UP_ARGS, the only non-default prefs; `tailscale up` refuses to run without them).
+# NeedsLogin (an expired node key) cannot be fixed here: it is logged, and the reverse-SSH fallback
+# (netra-node-revssh.service) is the way in. The last action goes into the minute report (ts_wd), and the droplet
+# writes it to its event log. Without internet the Wi-Fi watchdog acts instead; this one waits.
+set -u
+[ -f /etc/default/netra-node-tailscale-watchdog ] && . /etc/default/netra-node-tailscale-watchdog
+. /etc/netra-node-report.env   # NODEGUARD_URL: the droplet's receiver on its Tailscale IP
+BAD_MIN=${BAD_MIN:-3}; RESTART_GAP_MIN=${RESTART_GAP_MIN:-10}; DRY=${DRY:-0}
+TS_UP_ARGS=${TS_UP_ARGS:-"--accept-dns=false --hostname=demo-node"}
+CHECK_URL=${CHECK_URL:-http://connectivitycheck.gstatic.com/generate_204}
+PEER_URL=${PEER_URL:-${NODEGUARD_URL%/report}/}
+PEER_IP=${PEER_IP:-$(echo "$PEER_URL" | sed -E 's|^https?://([^:/]+).*|\1|')}
+STATE=${STATE:-/run/netra-ts-watchdog}; LOG=${LOG:-/var/log/netra-node-tailscale-watchdog.log}
+mkdir -p "$STATE"
+log(){ logger -t netra-ts-watchdog "$*"; echo "$(date -Is) $*" >> "$LOG"; echo "$*"; }
+get(){ cat "$STATE/$1" 2>/dev/null || echo "${2:-0}"; }
+put(){ echo "$2" > "$STATE/$1"; }
+action(){ log "$*"; echo "$(date +%s)|$*" > "$STATE/last_action"; }   # netra-node-report sends this as ts_wd
+[ "$(stat -c %s "$LOG" 2>/dev/null || echo 0)" -gt 1000000 ] && { tail -n 2000 "$LOG" > "$LOG.tmp"; mv "$LOG.tmp" "$LOG"; }
+
+backend(){ timeout 15 tailscale status --json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("BackendState","?"))' 2>/dev/null || echo unresponsive; }
+peer_ok(){
+  [ "$(curl -s -o /dev/null -m 10 -w '%{http_code}' "$PEER_URL" 2>/dev/null)" != 000 ] && return 0   # any HTTP answer
+  timeout 20 tailscale ping --c 2 --timeout 5s "$PEER_IP" 2>/dev/null | grep -q "pong from"
+}
+
+now=$(date +%s); be=$(backend)
+if [ "$be" = Running ] && peer_ok; then
+  [ "$(get bad_since)" != 0 ] && log "healthy again (BackendState Running, droplet $PEER_IP reachable)"
+  put bad_since 0; exit 0
+fi
+why="BackendState $be, droplet $PEER_IP $(peer_ok && echo reachable || echo UNREACHABLE) over the tailnet"
+if [ "$(curl -s -o /dev/null -m 10 -w '%{http_code}' "$CHECK_URL" 2>/dev/null)" != 204 ]; then
+  [ "$(get bad_since)" != 0 ] && log "unhealthy ($why) but no internet either: leaving it to the Wi-Fi watchdog"
+  put bad_since 0; exit 0
+fi
+since=$(get bad_since); [ "$since" = 0 ] && { since=$now; put bad_since $now; log "unhealthy: $why (internet OK)"; }
+[ $((now - since)) -lt $((BAD_MIN * 60)) ] && exit 0
+if [ "$be" = NeedsLogin ]; then
+  [ "$(get needslogin_logged)" = "$since" ] || { action "NeedsLogin: node key expired or logged out; a restart cannot fix it (use the reverse-SSH fallback, re-auth)"; put needslogin_logged "$since"; }
+  exit 0
+fi
+if [ $((now - $(get last_restart))) -lt $((RESTART_GAP_MIN * 60)) ]; then exit 0; fi
+put last_restart "$now"
+if [ "$DRY" = 1 ]; then action "would restart tailscaled ($why for $(( (now - since) / 60 )) min) [DRY]"; exit 0; fi
+systemctl restart tailscaled; sleep 20; be2=$(backend)
+if [ "$be2" = Stopped ]; then tailscale up $TS_UP_ARGS >/dev/null 2>&1; sleep 10; be2="$(backend) after tailscale up"; fi
+action "restarted tailscaled ($why for $(( (now - since) / 60 )) min) -> BackendState $be2, droplet $(peer_ok && echo reachable || echo 'still UNREACHABLE')"
+put bad_since 0

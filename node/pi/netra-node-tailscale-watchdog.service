@@ -1,0 +1,7 @@
+[Unit]
+Description=demo-node Tailscale watchdog (restart tailscaled after 3 min not Running / droplet unreachable while internet works)
+After=tailscaled.service NetworkManager.service
+[Service]
+Type=oneshot
+TimeoutStartSec=150
+ExecStart=/usr/local/sbin/netra-node-tailscale-watchdog

@@ -1,0 +1,22 @@
+# Fallback access that does not use Tailscale (nodeguard, 2026-10-27): a persistent reverse SSH tunnel to the droplet.
+# The droplet account noderev (nologin, key restricted to permitlisten="127.0.0.1:2201") can do nothing but hold
+# 127.0.0.1:2201 on the droplet -> this Pi's sshd. From a machine that can ssh to the droplet:
+#   ssh -J root@<droplet> -p 2201 -o HostKeyAlias=demo-node-rev netra@127.0.0.1
+# Restarted forever (StartLimitIntervalSec=0); ExitOnForwardFailure makes a still-held port (old session not yet
+# timed out by the droplet's ClientAliveInterval 15 x 3) a retry instead of a tunnel without the forward.
+# <droplet> is set in a drop-in on the machine (/etc/systemd/system/netra-node-revssh.service.d/host.conf:
+#   [Service] Environment=RELAY_HOST=<droplet>), so no host is in git.
+[Unit]
+Description=Reverse SSH fallback to the droplet (127.0.0.1:2201 -> Pi sshd), independent of Tailscale
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+[Service]
+User=netra
+ExecStart=/usr/bin/ssh -N -i /home/netra/.ssh/noderev_ed25519 -o BatchMode=yes -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o ConnectTimeout=20 -o StrictHostKeyChecking=yes \
+  -o IdentitiesOnly=yes -R 127.0.0.1:2201:127.0.0.1:22 noderev@${RELAY_HOST}
+Restart=always
+RestartSec=15
+[Install]
+WantedBy=multi-user.target
