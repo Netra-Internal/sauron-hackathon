@@ -1,0 +1,12 @@
+# Droplet: R2 presigner for the cloud pod's footage archiver (cloud/droplet/presign.py), 127.0.0.1:8472 only.
+[Unit]
+Description=R2 presigner for the cloud pod archiver (127.0.0.1:8472, _ephemeral/footage/ only)
+After=network-online.target
+[Service]
+EnvironmentFile=/etc/netra-ask-relay.env
+DynamicUser=yes
+ExecStart=/opt/netra/netra-ask/.venv/bin/python -u /opt/netra/cloud/presign.py
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=multi-user.target

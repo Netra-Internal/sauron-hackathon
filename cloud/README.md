@@ -19,6 +19,9 @@ camera -> box ffmpeg -c copy -> ssh -L via droplet (cloudrelay) -> pod mediamtx 
 | `pod/supervise.py` / `supervise.sh` | one edge per configured camera whose stream is live; manual restart wrapper |
 | `pod/dispatch.sh` | Jev dispatch watcher for one camera (`DISPATCH_CAMS` in boot.sh) |
 | `pod/build_trt.py` | SigLIP TensorRT engine build |
+| `pod/archive.py` | hourly ring → R2 `_ephemeral/footage/<cam>/<UTC date>/<epoch>.mkv` (12-day lifecycle), size-checked; cameras in `/workspace/edge/archive_cams` |
+| `droplet/presign.py` + `netra-r2-presign`, `netra-cloud-presign-tunnel` | presigned PUT/HEAD for the archiver (R2 keys stay on the droplet; `ssh -R` to the pod's 127.0.0.1:8472) |
+| `droplet/evidence.py` + `netra-cloud-evidence.timer` | every 10 min: footage ±2 min around each live incident → non-expiring `evidence/<cam>/<incident>/` |
 | `pod/authorized_keys` | droplet key, forward-only to the pod's 8450/8888 |
 | `pod/ffmpeg-ring-flush.sh`, `pod/cloudsite/` | experiments that did not help (kept for the record) |
 | `push.sh`, `push.env.example` | box side: all cameras in `STREAMS` over one SSH tunnel, Wi-Fi-only guard |

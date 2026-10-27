@@ -1,0 +1,11 @@
+# Droplet: puts the R2 presigner (127.0.0.1:8472) on the cloud pod's loopback for cloud/pod/archive.py (ssh -R).
+# The pod's SSH port (-p) changes on every pod restart: update it here.
+[Unit]
+Description=SSH reverse tunnel cloud pod 127.0.0.1:8472 -> droplet R2 presigner 127.0.0.1:8472
+After=network-online.target netra-r2-presign.service
+[Service]
+ExecStart=/usr/bin/ssh -N -i /root/.ssh/cloudedge_ed25519 -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=accept-new -p <POD_SSH_PORT> -R 127.0.0.1:8472:127.0.0.1:8472 <pod>
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=multi-user.target

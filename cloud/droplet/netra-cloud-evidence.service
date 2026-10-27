@@ -1,0 +1,12 @@
+# Droplet: copy archived footage around each live incident to evidence/ (cloud/droplet/evidence.py); run by the timer.
+[Unit]
+Description=Copy incident footage from _ephemeral/footage/ to non-expiring evidence/ in R2
+After=network-online.target postgresql.service
+[Service]
+Type=oneshot
+User=netra
+EnvironmentFile=/etc/netra-ask-relay.env
+Environment=ASK_DATABASE_URL=postgresql:///netra_ask
+StateDirectory=netra-cloud-evidence
+ExecStart=/opt/netra/netra-ask/.venv/bin/python -u /opt/netra/cloud/evidence.py
+TimeoutStartSec=900
