@@ -90,8 +90,10 @@ SECRET=/root/dispatch.secret; ENC=$W/dispatch.secret.enc
   [ -s $ENC ] && openssl enc -d -aes-256-cbc -pbkdf2 -pass env:ASK_WORKER_TOKEN -in $ENC -out $SECRET.new \
     && grep -q '^TYPESAFE_API_KEY=.' $SECRET.new && mv -f $SECRET.new $SECRET \
     || { rm -f $SECRET.new; echo "== WARNING: no Jev key for the dispatch watchers ($ENC missing or not decryptable with ASK_WORKER_TOKEN)"; } )
-# Jev dispatch watcher per camera in $DISPATCH_CAMS + $W/dispatch_cams (key: $SECRET, tuning: $W/dispatch.env).
-# The file adds cameras without update-pod (an env change restarts the container and RunPod remaps its public ports).
-for c in $(echo ${DISPATCH_CAMS:-} $(cat $W/dispatch_cams 2>/dev/null) | tr ' ' '\n' | sort -u); do setsid bash cloud/pod/dispatch.sh "$c" < /dev/null > /dev/null 2>&1 & done
+# Jev dispatch watcher per camera in $W/dispatch_cams, or $DISPATCH_CAMS when that file is absent (key: $SECRET,
+# tuning: $W/dispatch.env). The file sets the list without update-pod (an env change restarts the container and RunPod
+# remaps its public ports), so it also drops cameras the env still names.
+cams=$(cat $W/dispatch_cams 2>/dev/null || echo ${DISPATCH_CAMS:-})
+for c in $(echo $cams | tr ' ' '\n' | sort -u); do setsid bash cloud/pod/dispatch.sh "$c" < /dev/null > /dev/null 2>&1 & done
 echo "== services up $(date -u)"
 wait

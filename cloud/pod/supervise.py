@@ -3,8 +3,10 @@
 A camera joins the cloud edge by config + stream only: it is in the droplet's edge config (sites.yaml) and a box pushes
 it to the pod as mediamtx path <stream> (= the production camera id). Every 15 s this reads the config and mediamtx's
 ready paths; a configured camera with a ready path gets an edge process with its source_env set to
-rtsp://127.0.0.1:8554/<stream>. A process that exits is restarted (as systemd's Restart=always does on the Jetson). Once
-started, an edge keeps running when its stream drops: it reports the growing frame age, which is what pages."""
+rtsp://127.0.0.1:8554/<stream>. A process that exits is restarted (as systemd's Restart=always does on the Jetson) once
+its stream is ready, so stopping the edge of a camera that no longer streams here retires it. Once started, an edge keeps
+running when its stream drops: it reports the growing frame age, which is what pages. Edges outlive the supervisor; a new
+supervisor adopts the ones already running instead of starting a second edge per camera."""
 from __future__ import annotations
 
 import json
@@ -26,8 +28,36 @@ def get(url: str, auth: bool) -> dict:
         return json.loads(r.read())
 
 
+class Adopted:
+    """An edge started by an earlier supervisor (not our child): alive while its pid is."""
+
+    def __init__(self, pid: int):
+        self.pid, self.returncode = pid, None
+
+    def poll(self):
+        try:
+            os.kill(self.pid, 0)
+        except ProcessLookupError:
+            self.returncode = -1
+        return self.returncode
+
+
+def running_edges() -> dict[str, Adopted]:
+    out = {}
+    for d in filter(str.isdigit, os.listdir("/proc")):
+        try:
+            argv = open(f"/proc/{d}/cmdline", "rb").read().split(b"\0")
+        except OSError:
+            continue
+        if b"ask.edge.main" in argv and b"--camera" in argv[:-1]:
+            out[argv[argv.index(b"--camera") + 1].decode()] = Adopted(int(d))
+    return out
+
+
 def main():
-    procs: dict[str, subprocess.Popen] = {}
+    procs: dict[str, subprocess.Popen | Adopted] = running_edges()
+    for cid, p in procs.items():
+        print(f"{time.strftime('%T')} edge {cid} adopted (pid {p.pid})", flush=True)
     while True:
         try:
             cams = get(f"{ASK}/api/edge/config", True)["cameras"]
@@ -37,7 +67,7 @@ def main():
                 p = procs.get(cid)
                 if p is not None and p.poll() is None:
                     continue
-                if p is None and stream not in ready:
+                if stream not in ready:
                     continue
                 if p is not None:
                     print(f"{time.strftime('%T')} edge {cid} exited {p.returncode}; restarting", flush=True)
