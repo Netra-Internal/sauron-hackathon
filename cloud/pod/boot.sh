@@ -77,7 +77,20 @@ keep supervise $PY -u cloud/pod/supervise.py &      # one edge per configured ca
 keep serve $PY -u -m ask.edge.serve --bind 127.0.0.1 --port 8450 &
 # ring -> R2 archiver (_ephemeral/footage/, 12-day expiry) for the cameras in $W/archive_cams; URLs from the droplet's presigner
 [ -s $W/archive_cams ] && keep archive $PY -u cloud/pod/archive.py &
-# Jev dispatch watcher per camera in $DISPATCH_CAMS + $W/dispatch_cams (needs TYPESAFE_API_KEY in the env or $W/dispatch.env).
+# Jev key: /workspace is a FUSE volume that ignores chmod (files show 0666), so the key is kept there only encrypted
+# (dispatch.secret.enc, passphrase = ASK_WORKER_TOKEN from the pod env) and decrypted to the container disk at 600.
+# A plaintext TYPESAFE_API_KEY line found in dispatch.env* is moved into the encrypted file and removed.
+SECRET=/root/dispatch.secret; ENC=$W/dispatch.secret.enc
+( umask 077
+  plain=$(grep -h '^TYPESAFE_API_KEY=' $W/dispatch.env $W/dispatch.env.* 2>/dev/null | head -1)   # live file first
+  if [ -n "$plain" ]; then
+    printf '%s\n' "$plain" | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:ASK_WORKER_TOKEN -out $ENC.new && mv -f $ENC.new $ENC \
+      && sed -i '/^TYPESAFE_API_KEY=/d' $W/dispatch.env* && echo "== Jev key moved from dispatch.env into $ENC"
+  fi
+  [ -s $ENC ] && openssl enc -d -aes-256-cbc -pbkdf2 -pass env:ASK_WORKER_TOKEN -in $ENC -out $SECRET.new \
+    && grep -q '^TYPESAFE_API_KEY=.' $SECRET.new && mv -f $SECRET.new $SECRET \
+    || { rm -f $SECRET.new; echo "== WARNING: no Jev key for the dispatch watchers ($ENC missing or not decryptable with ASK_WORKER_TOKEN)"; } )
+# Jev dispatch watcher per camera in $DISPATCH_CAMS + $W/dispatch_cams (key: $SECRET, tuning: $W/dispatch.env).
 # The file adds cameras without update-pod (an env change restarts the container and RunPod remaps its public ports).
 for c in $(echo ${DISPATCH_CAMS:-} $(cat $W/dispatch_cams 2>/dev/null) | tr ' ' '\n' | sort -u); do setsid bash cloud/pod/dispatch.sh "$c" < /dev/null > /dev/null 2>&1 & done
 echo "== services up $(date -u)"
