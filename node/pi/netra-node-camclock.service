@@ -1,0 +1,8 @@
+[Unit]
+Description=Keep the camera's clock (ISAPI) within 30 s of the Pi's NTP time
+Wants=network-online.target time-sync.target
+After=network-online.target time-sync.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/netra-node-camclock

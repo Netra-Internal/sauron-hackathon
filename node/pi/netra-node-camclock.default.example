@@ -1,0 +1,5 @@
+# /etc/default/netra-node-camclock (root 0600)
+CAM_HOST=<camera-ip>
+CAM_USER=admin
+CAM_PASS=<camera password>
+CAM_TZ=America/Los_Angeles

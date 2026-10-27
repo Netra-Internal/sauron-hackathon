@@ -1,0 +1,9 @@
+[Unit]
+Description=Check the camera's clock at boot and every 30 min
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=30min
+
+[Install]
+WantedBy=timers.target

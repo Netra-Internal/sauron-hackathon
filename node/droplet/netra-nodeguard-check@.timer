@@ -1,5 +1,5 @@
 [Unit]
-Description=nodeguard check every minute
+Description=nodeguard check of %i every minute
 [Timer]
 OnBootSec=2min
 OnUnitInactiveSec=1min

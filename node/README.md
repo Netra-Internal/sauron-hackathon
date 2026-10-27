@@ -1,8 +1,12 @@
-# node/: keep a solar camera node (demo-node) alive and known (theft week, 2026-10-26)
+# node/: keep the solar camera nodes (demo-node, demo-node2) alive and known (theft week, 2026-10-26)
 
 demo-node is a Raspberry Pi 4 with a Linovision camera on eth0, on solar + a 12 V 15 Ah battery. Its only uplink is
 UCSD-GUEST Wi-Fi: onboard wlan0, plus a USB MT7921 (wlan1) since Oct 26. `cloud/push.sh` (`netra-cloud-push`) sends the
 video to the cloud pod. This directory keeps it running unattended and records when it is up.
+
+demo-node2 (Oct 27) is the same build with a second Linovision (camera id `demo-linovision-2`) and gets the same set,
+with its own relay key, its own noderev key and port (2202), `TS_UP_ARGS="--hostname=demo-node2"` in
+`/etc/default/netra-node-tailscale-watchdog`, plus `netra-node-camclock`.
 
 ## Pi (`pi/`)
 - `netra-node-wifi-watchdog` + timer (every minute). Each Wi-Fi interface without internet (no 204 from
@@ -12,6 +16,10 @@ video to the cloud pod. This directory keeps it running unattended and records w
   Log: `/var/log/netra-node-wifi-watchdog.log` (RAM under the overlay) and `/boot/firmware/netra-wifi-watchdog/reboots.log`.
 - `netra-node-report` + timer (every minute). Over Tailscale it POSTs boot_id, uptime, `vcgencmd get_throttled`, load,
   temp, RSSI and whether its push ssh is connected to the relay (`tunnel_up`) to the droplet's receiver. It stores nothing, so it works on the read-only root.
+- `netra-node-camclock` + timer (boot + every 30 min; demo-node2). The camera LAN has no NTP and the camera restarts at
+  2000-01-0x after a power loss (burned into the OSD). ISAPI `PUT /System/time` works on this camera, so when its clock
+  is more than 30 s off the Pi's NTP time it is set to Pacific time (manual mode). Skipped while the Pi itself is unsynced.
+  Env: `/etc/default/netra-node-camclock` (root 0600, see the `.example`).
 - Read-only root: `raspi-config nonint do_overlayfs 0` (overlayroot=tmpfs). `/boot/firmware` stays **rw** because the
   fstab `,ro` that raspi-config adds was removed. journald is volatile (`RuntimeMaxUse=64M`).
   **Persistent changes** now go to the lower layer: `sudo overlayroot-chroot <cmd>` (stdin works), or
@@ -19,7 +27,8 @@ video to the cloud pod. This directory keeps it running unattended and records w
   next boot ("mount point is busy"). The next boot mounts it ro again.
 
 ## Droplet (`droplet/`)
-- `nodeguard.py check` (timer `netra-nodeguard-check`, every minute) observes four things:
+- `nodeguard.py check` (timer `netra-nodeguard-check@<node>`, every minute, one instance per node; NODE and CAMERA in
+  `/etc/netra-nodeguard.d/<node>.env`, state in `state-<node>.json`) observes four things:
   - node: `tailscale ping`, or a Pi report under 3 min old;
   - tunnel: the Pi's `tunnel_up` in a fresh report. UCSD-GUEST changes the public NAT IP under a live session, so the droplet cannot match sessions by IP;
   - video: feed_health has a row with `fps_analysed > 0` in the last 3 min;
@@ -29,7 +38,7 @@ video to the cloud pod. This directory keeps it running unattended and records w
   - without a mention: back ONLINE, video recovered, rebooted.
 - `nodeguard.py serve` (`netra-nodeguard-recv`): the receiver, bound to the droplet's Tailscale IP only, with a bearer
   token. Each report is appended to `reports-<node>-YYYY-MM.jsonl` (the load/throttle history).
-- `nodeguard.py timeline --days 7`: the timeline with outage durations.
+- `nodeguard.py timeline --days 7`: the timeline with outage durations, every node (`--node demo-node2` for one).
 - Secrets: `/etc/netra-nodeguard.env` on the droplet and `/etc/netra-node-report.env` on the Pi (root 0600, see the
   `*.example` files). Never in git.
 - Event kinds: node, video, tunnel, boot, throttle, note (hand-added corrections). Reserved: `power` (`v`, `a`) for an
@@ -55,7 +64,10 @@ video to the cloud pod. This directory keeps it running unattended and records w
   - **Getting in:**
     ```
     ssh -J root@<droplet> -p 2201 -o HostKeyAlias=demo-node-rev netra@127.0.0.1
+    ssh -J root@<droplet> -p 2202 -o HostKeyAlias=demo-node2-rev netra@127.0.0.1    # demo-node2
     ```
+    One port per node: `REV_PORT` in the unit's drop-in, the node's key line `permitlisten="127.0.0.1:<port>"`, and the
+    port added to `PermitListen` in `droplet/sshd-70-noderev.conf`.
   - **Droplet setup:**
     `useradd --system --home-dir /var/lib/noderev --create-home --shell /usr/sbin/nologin noderev`, then
     `/var/lib/noderev/.ssh/authorized_keys` (root:noderev 640) holding `restrict,port-forwarding,permitlisten="127.0.0.1:2201" <pi pubkey>`,
@@ -106,7 +118,8 @@ Droplet:
 ```
 install -d /opt/netra/nodeguard && install -m 755 droplet/nodeguard.py /opt/netra/nodeguard/
 install -m 600 <filled droplet/nodeguard.env.example> /etc/netra-nodeguard.env
-install -m 644 droplet/netra-nodeguard-*.service droplet/netra-nodeguard-check.timer /etc/systemd/system/
-systemctl daemon-reload && systemctl enable --now netra-nodeguard-recv.service netra-nodeguard-check.timer
+install -m 644 droplet/netra-nodeguard-*.service droplet/netra-nodeguard-check@.timer /etc/systemd/system/
+install -d -m 700 /etc/netra-nodeguard.d   # one <node>.env per node: NODE=... CAMERA=...
+systemctl daemon-reload && systemctl enable --now netra-nodeguard-recv.service netra-nodeguard-check@demo-node.timer netra-nodeguard-check@demo-node2.timer
 ```
 Tests: `pytest tests/test_nodeguard.py` (state machine and timeline; no network).

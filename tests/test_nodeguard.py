@@ -1,6 +1,7 @@
 """node/droplet/nodeguard.py: the state machine and the timeline (no network, no DB, no Discord)."""
 import datetime as dt
 import importlib.util
+import json
 from pathlib import Path
 
 spec = importlib.util.spec_from_file_location("nodeguard", Path(__file__).parent.parent / "node/droplet/nodeguard.py")
@@ -196,3 +197,15 @@ def test_tailscale_action_out_of_order_report_not_relogged():
                           for m, x in enumerate(seq)])
     assert [e["text"] for e in evs if e["kind"] == "tailscale"] == ["restarted tailscaled (B)"]
 
+
+
+def test_timeline_lists_every_node(tmp_path, monkeypatch, capsys):
+    evs = [{"t": "2026-10-27T22:00:00+00:00", "node": n, "kind": "node", "state": "online", "first": True}
+           for n in ("demo-node2", "demo-node")]
+    (tmp_path / "events.jsonl").write_text("\n".join(json.dumps(e) for e in evs) + "\n")
+    monkeypatch.setattr(ng, "EVENTS", tmp_path / "events.jsonl")
+    monkeypatch.setattr(ng, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(ng, "now_utc", lambda: T0 + dt.timedelta(days=1))
+    ng.cmd_timeline(type("A", (), {"node": "all", "days": 7})())
+    out = capsys.readouterr().out
+    assert out.index("demo-node timeline") < out.index("demo-node2 timeline")

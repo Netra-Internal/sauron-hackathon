@@ -1,7 +1,8 @@
 [Unit]
-Description=nodeguard: demo-node online/video/boot check -> event log + Discord
+Description=nodeguard: %i online/video/boot check -> event log + Discord
 [Service]
 Type=oneshot
 TimeoutStartSec=100
 EnvironmentFile=/etc/netra-nodeguard.env
+EnvironmentFile=/etc/netra-nodeguard.d/%i.env
 ExecStart=/usr/bin/python3 /opt/netra/nodeguard/nodeguard.py check

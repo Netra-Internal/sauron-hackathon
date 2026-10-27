@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""nodeguard: the droplet watches a solar camera node (demo-node) and keeps its power/uptime timeline.
+"""nodeguard: the droplet watches the solar camera nodes (demo-node, demo-node2) and keeps their power/uptime timeline.
 
 The droplet does the watching because a dead Pi cannot report its own death.
 
-  nodeguard.py check      every minute (systemd timer): observe -> step() -> append transitions to the event log,
-                          post them to Discord.
+  nodeguard.py check      every minute, one systemd timer instance per node (netra-nodeguard-check@<node>, NODE and
+                          CAMERA from /etc/netra-nodeguard.d/<node>.env): observe -> step() -> append transitions to the
+                          shared event log, post them to Discord. State per node: state-<node>.json.
   nodeguard.py serve      tiny HTTP receiver, bound to the droplet's Tailscale IP only. The Pi POSTs a report every
                           minute (node/pi/netra-node-report): boot_id, uptime, vcgencmd get_throttled, load, temp.
-  nodeguard.py timeline   prints the event log for the last N days, with outage durations.
+  nodeguard.py timeline   prints the event log for the last N days, with outage durations (every node, or --node).
 
 Observations per check:
   node   : `tailscale ping` to the node, or a Pi report received in the last REPORT_FRESH_S.
@@ -49,7 +50,7 @@ NODE = os.environ.get("NODE", "demo-node")
 CAMERA = os.environ.get("CAMERA", "demo-linovision")
 STATE_DIR = Path(os.environ.get("STATE_DIR", "/var/lib/netra-nodeguard"))
 EVENTS = STATE_DIR / "events.jsonl"
-STATE = STATE_DIR / "state.json"
+STATE = STATE_DIR / f"state-{NODE}.json"
 OFFLINE_AFTER_S = int(os.environ.get("OFFLINE_AFTER_S", "180"))
 VIDEO_DOWN_AFTER_S = int(os.environ.get("VIDEO_DOWN_AFTER_S", "180"))
 REPORT_FRESH_S = int(os.environ.get("REPORT_FRESH_S", "180"))
@@ -280,9 +281,9 @@ def video_last_ok() -> dt.datetime | None:
     return dt.datetime.fromtimestamp(float(v), dt.timezone.utc) if v else None
 
 
-def last_report() -> dict | None:
+def last_report(node: str = NODE) -> dict | None:
     try:
-        return json.loads((STATE_DIR / f"report-{NODE}.json").read_text())
+        return json.loads((STATE_DIR / f"report-{node}.json").read_text())
     except (OSError, ValueError):
         return None
 
@@ -450,14 +451,15 @@ def cmd_timeline(args) -> int:
     evs = []
     if EVENTS.exists():
         evs = [json.loads(l) for l in EVENTS.read_text().splitlines() if l.strip()]
-    evs = [e for e in evs if e.get("node") == args.node]
     now = now_utc()
-    print(f"{args.node} timeline, last {args.days} days (UTC; event log {EVENTS})")
-    for line in timeline(evs, now - dt.timedelta(days=args.days), now):
-        print(line)
-    rep = last_report()
-    if rep:
-        print("   last Pi report:", _rep_line(rep))
+    nodes = [args.node] if args.node != "all" else sorted({e.get("node") for e in evs if e.get("node")})
+    for i, node in enumerate(nodes):
+        print(("\n" if i else "") + f"{node} timeline, last {args.days} days (UTC; event log {EVENTS})")
+        for line in timeline([e for e in evs if e.get("node") == node], now - dt.timedelta(days=args.days), now):
+            print(line)
+        rep = last_report(node)
+        if rep:
+            print("   last Pi report:", _rep_line(rep))
     return 0
 
 
@@ -469,7 +471,7 @@ def main() -> int:
     s.add_argument("--bind", default=os.environ.get("BIND", "127.0.0.1:8790"))
     t = sub.add_parser("timeline")
     t.add_argument("--days", type=float, default=7)
-    t.add_argument("--node", default=NODE)
+    t.add_argument("--node", default="all", help="one node, or all (default)")
     a = ap.parse_args()
     return {"check": cmd_check, "serve": cmd_serve, "timeline": cmd_timeline}[a.cmd](a)
 

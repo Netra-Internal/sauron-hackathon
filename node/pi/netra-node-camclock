@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# netra-node-camclock (demo-node2, 2026-10-27). The Linovision camera sits on the isolated camera LAN (no NTP reachable)
+# and comes up at 2000-01-0x after a power loss, which is burned into the OSD. ISAPI PUT /System/time works on it.
+# At boot and every 30 min: read the camera's clock and, if it is more than MAX_SKEW_S off the Pi's (NTP-synced) local
+# time in CAM_TZ, set it (manual mode). Does nothing while the Pi's own clock is not synced (no RTC: it would be wrong).
+#   env (/etc/default/netra-node-camclock, root 0600): CAM_HOST  CAM_USER  CAM_PASS  CAM_TZ (default America/Los_Angeles)
+set -u
+. /etc/default/netra-node-camclock
+CAM_TZ=${CAM_TZ:-America/Los_Angeles}; MAX_SKEW_S=${MAX_SKEW_S:-30}
+LOG=${LOG:-/var/log/netra-node-camclock.log}
+log(){ logger -t netra-camclock "$*"; echo "$(date -Is) $*" >> "$LOG"; echo "$*"; }
+isapi(){ curl -s -m 10 --digest -u "$CAM_USER:$CAM_PASS" "$@"; }
+[ "$(timedatectl show -p NTPSynchronized --value)" = yes ] || { echo "Pi clock not synced; skipping"; exit 0; }
+cam=$(isapi "http://$CAM_HOST/ISAPI/System/time" | sed -n 's|.*<localTime>\(.*\)</localTime>.*|\1|p')
+[ -n "$cam" ] || { log "camera $CAM_HOST: no answer to GET /ISAPI/System/time"; exit 0; }
+cam_s=$(TZ=$CAM_TZ date -d "${cam/T/ }" +%s 2>/dev/null || echo 0); now=$(date +%s)
+skew=$((cam_s - now)); [ $skew -lt 0 ] && skew=$((-skew))
+[ $skew -le "$MAX_SKEW_S" ] && exit 0
+# The camera stores a POSIX-style zone; "CST+7" etc. Use the current UTC offset so the OSD shows local time.
+off=$(TZ=$CAM_TZ date +%z); h=$((10#${off:1:2})); [ "${off:0:1}" = - ] && sign=+ || sign=-
+local=$(TZ=$CAM_TZ date +%Y-%m-%dT%H:%M:%S)
+r=$(isapi -X PUT -H "Content-Type: application/xml" "http://$CAM_HOST/ISAPI/System/time" --data \
+  "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Time version=\"2.0\" xmlns=\"http://www.std-cgi.com/ver20/XMLSchema\"><timeMode>manual</timeMode><localTime>$local</localTime><timeZone>CST${sign}${h}:00:00</timeZone></Time>" \
+  | sed -n 's|.*<subStatusCode>\(.*\)</subStatusCode>.*|\1|p')
+log "camera clock was $cam (${skew}s off); set to $local $CAM_TZ (CST${sign}${h}) -> ${r:-no answer}"
