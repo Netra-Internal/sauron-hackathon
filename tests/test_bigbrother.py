@@ -53,7 +53,9 @@ def test_yes_only_counts_with_a_pending_proposal():
 # --- thank yous ----------------------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("text,n", [("Do 5 thank yous", 5), ("do 5 thank you", 5), ("DO FIVE THANK YOUS", 5),
-                                    ("do twenty-one thank yous!", 21), ("do 1 thank you", 1), ("Do a hundred thank yous", 100)])
+                                    ("do twenty-one thank yous!", 21), ("do 1 thank you", 1), ("Do a hundred thank yous", 100),
+                                    ("give me five thank yous", 5), ("five thank yous", 5), ("say 3 thank yous!", 3),
+                                    ("send me ten thank-yous please", 10)])
 def test_parse_thanks(text, n):
     assert policy.parse_thanks(text) == n
     assert policy.classify(msg(content=text, mentions_bot=False), CFG) == "thanks"
@@ -66,6 +68,7 @@ def test_thanks_reply_exact_and_capped():
     assert first == " ".join(["thank you"] * 100) and "capped at 100" in note and len(capped) < 2000
     assert policy.parse_thanks("do lots of thank yous") is None
     assert policy.parse_thanks("what did jev cost today") is None
+    assert policy.parse_thanks("status") is None and policy.parse_thanks("thank you") is None
 
 
 # --- what it may change --------------------------------------------------------------------------------------------

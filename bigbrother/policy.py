@@ -22,7 +22,8 @@ WORDS = {w: i for i, w in enumerate(
     "eighteen nineteen twenty".split())}
 WORDS.update({"thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90,
               "hundred": 100, "a": 1, "an": 1})
-THANKS = re.compile(r"^\s*do\s+(?P<n>[\w\s-]+?)\s+thank[\s-]*you(?:s)?\s*[.!]*\s*$", re.I)
+THANKS = re.compile(r"^\s*(?:(?:please\s+)?(?:do|give(?:\s+me)?|say|send(?:\s+me)?)\s+)?(?P<n>[\w\s-]+?)\s+"
+                    r"thank[\s-]*you(?:s)?\s*(?:please)?\s*[.!]*\s*$", re.I)
 THANKS_CAP = 100
 
 
