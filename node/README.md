@@ -4,6 +4,12 @@ demo-node is a Raspberry Pi 4 with a Linovision camera on eth0, on solar + a 12 
 UCSD-GUEST Wi-Fi: onboard wlan0, plus a USB MT7921 (wlan1) since Oct 26. `cloud/push.sh` (`netra-cloud-push`) sends the
 video to the cloud pod. This directory keeps it running unattended and records when it is up.
 
+**Upload budget per node** (measured Oct 28, Cloudflare upload with the push stopped): demo-node wlan1 10-13 Mbit/s,
+wlan0 2.6; demo-node2 wlan1 1.7-2.0, wlan0 0.86 (same UCSD-GUEST AP, weaker signal, 1.5 % TCP retransmits vs 0.07 %).
+The push must stay well under it: a stalled upload makes ffmpeg stop reading, the camera drops the RTSP session, and the
+relaunch churn wedges the Pi encoder. demo-node2 therefore pushes 800 kbit/s, GOP 3 s (`PUSH_VCODEC` in
+`/etc/netra-cloud-push.env`, `FALLBACK_VCODEC` in `/etc/default/netra-node-push-health`); demo-node 1.5 Mbit/s.
+
 demo-node2 (Oct 27) is the same build with a second Linovision (camera id `demo-linovision-2`) and gets the same set,
 with its own relay key, its own noderev key and port (2202), `TS_UP_ARGS="--hostname=demo-node2"` in
 `/etc/default/netra-node-tailscale-watchdog`, plus `netra-node-camclock`.
