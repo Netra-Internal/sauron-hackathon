@@ -174,7 +174,11 @@ for c in rd("archive_cams"):
     # "eligible since" is the time of the segment two places after it, not its own time (matters after an outage)
     elig = [os.path.getmtime(seg[k + 2]) for k in range(len(seg) - 2) if os.path.basename(seg[k]) not in done]
     arch[c] = {"pending": len(elig), "oldest_pending": min(elig) if elig else None}
+site = lambda pat: sorted({l.split("--site")[1].split()[0] for l in ps if pat in l and "--site" in l})
 print(json.dumps({"now": time.time(), "edge": cams("ask.edge.main"), "watch": cams("ask.dispatch.watch"),
+                  "edge_jev": sorted({l.split("--camera")[1].split()[0] for l in ps
+                                      if "ask.edge.main" in l and "--camera" in l and "--jev on" in l}),
+                  "engine": site("-m ask.siteengine"), "judged": site("-m ask.perception.judged"),
                   "dispatch_cams": rd("dispatch_cams"), "archive_running": any(l.endswith("cloud/pod/archive.py") for l in ps),
                   "archive": arch}))
 EOF"""
@@ -189,9 +193,11 @@ def pod_issues(now: float) -> tuple[list[Issue], dict]:
                       [f"ssh to the pod failed (rc {r.get('rc')}): {r.get('err', '').strip()[-200:]}"])], {}
     out = []
     for cam in remote.CAMERAS:
-        if cam in p["dispatch_cams"] and cam not in p["watch"]:
+        # Jev runs either in a dispatch.sh watcher (today) or inside the edge with --jev on (perception, P3)
+        if cam in p["dispatch_cams"] and cam not in p["watch"] and cam not in p.get("edge_jev", []):
             out.append(Issue(f"watcher:{cam}", "watcher", cam, f"{cam} Jev dispatch watcher not running",
-                             [f"pod: {cam} is in dispatch_cams but no ask.dispatch.watch process (running: {p['watch']})"]))
+                             [f"pod: {cam} is in dispatch_cams but no ask.dispatch.watch process and no edge with "
+                              f"--jev on (watchers: {p['watch']}, edges: {p['edge']})"]))
     stale = [c for c, a in p["archive"].items()
              if a["oldest_pending"] and p["now"] - a["oldest_pending"] > ARCHIVE_STALE_S]
     if p["archive"] and (not p["archive_running"] or stale):
@@ -202,11 +208,71 @@ def pod_issues(now: float) -> tuple[list[Issue], dict]:
     return out, p
 
 
+ENGINE_DOWN_S = 60          # heartbeat every 10 s (ask/siteengine/droplet.py HEALTH_EVERY_S)
+ENGINE_LINK_S = 60          # camera fresh in feed_health but nothing reached the engine for this long
+STEP_BUDGET_MS = 3000       # camera -> decision budget (CENTRAL-ENGINE-PLAN verification 3)
+
+
+def engine_rows(site: str) -> list | None:
+    """Newest engine_health rows (epoch, health) for the site in the last 24 h, newest first; None if no table yet."""
+    sql = (f"select extract(epoch from received_at), health::text from engine_health where site_id='{site}' "
+           f"and received_at > now()-interval '24 hours' order by received_at desc limit 12")
+    p = subprocess.run(["sudo", "-u", "postgres", "psql", "-d", "netra_ask", "-X", "-At", "-F", "\t", "-c", sql],
+                       capture_output=True, text=True, timeout=30, cwd="/tmp")
+    if "does not exist" in p.stderr:
+        return None
+    out = []
+    for ln in p.stdout.splitlines():
+        t, h = ln.split("\t", 1)
+        out.append((float(t), json.loads(h)))
+    return out
+
+
+def engine_issues(site: str, rows: list | None, fh: dict, pod: dict, state: dict, now: float) -> list[Issue]:
+    """Only once the engine has run in the last 24 h (no rows = not deployed / switched off on purpose: silent)."""
+    out = []
+    seen = state.setdefault("seen", {})
+    if pod and site in pod.get("judged", []):
+        seen[f"judged:{site}"] = True
+    if not rows:
+        return out
+    t0, h = rows[0]
+    proc = (" (pod: engine process " + ("running" if site in pod.get("engine", []) else "NOT running") + ")") if pod else ""
+    if now - t0 > ENGINE_DOWN_S:
+        return [Issue(f"engine:{site}", "engine", site, f"site engine {site} down",
+                      [f"engine_health: last heartbeat {ago(t0, now)} ago ({pt(t0)}), every 10 s when up{proc}"])]
+    older = next(((t, oh) for t, oh in rows if t <= t0 - 60), None)
+    if older and h.get("steps") is not None and h.get("steps") == older[1].get("steps"):
+        out.append(Issue(f"engine:{site}", "engine", site, f"site engine {site} stuck",
+                         [f"engine_health: steps {h.get('steps')} unchanged since {pt(older[0])}; heartbeats still "
+                          f"arriving{proc}"]))
+    for cam, c in (h.get("cameras") or {}).items():
+        f = fh.get(cam)
+        rx = c.get("last_rx_age_s")
+        if f and f["age_s"] < ENGINE_LINK_S and (rx is None or rx > ENGINE_LINK_S):
+            out.append(Issue(f"enginelink:{cam}", "enginelink", cam, f"{cam} -> engine link broken",
+                             [f"feed_health: {cam} heartbeat {f['age_s']} s old (edge is up)",
+                              f"engine_health {pt(t0)}: last bucket from {cam} "
+                              + (f"{rx} s before" if rx is not None else "never received")]))
+    if (h.get("step_ms_last") or 0) > STEP_BUDGET_MS:
+        out.append(Issue(f"engineslow:{site}", "engineslow", site, f"site engine {site} slow",
+                         [f"engine_health: step_ms_last {h['step_ms_last']}, max {h.get('step_ms_max')} "
+                          f"(budget {STEP_BUDGET_MS} ms camera -> decision)"]))
+    if pod and site in pod.get("engine", []) and site not in pod.get("judged", []) and seen.get(f"judged:{site}"):
+        out.append(Issue(f"judged:{site}", "judged", site, f"on-demand Jev (judged) for {site} not running",
+                         [f"pod: ask.perception.judged --site {site} was running before and is gone; the engine's "
+                          f"needs_judgment rules get no Jev answers"]))
+    return out
+
+
 def detect(state: dict, now: float) -> tuple[list[Issue], dict]:
     states = {n: nodeguard_state(n) for n in remote.NODES}
     fh = feed(now)
     pod, probe = pod_issues(now)
-    issues = node_issues(states, now) + camera_issues(fh, states, now) + event_issues(new_events(state)) + pod
+    eng = []
+    for site in remote.ENGINE_SITES:
+        eng += engine_issues(site, engine_rows(site), fh, probe, state, now)
+    issues = node_issues(states, now) + camera_issues(fh, states, now) + event_issues(new_events(state)) + pod + eng
     return issues, {"feed": fh, "pod": probe, "nodes": {n: {k: s.get(k) for k in ("node", "video", "video_since")}
                                                         for n, s in states.items()}}
 
@@ -351,8 +417,47 @@ def report_pod(i: Issue, did: list[str]) -> bool | None:
     return False
 
 
+def wait_engine(site: str, timeout_s: int, sleep=time.sleep) -> tuple | None:
+    """A fresh heartbeat (< 20 s) whose step counter moved since the previous one."""
+    t0 = time.time()
+    while time.time() - t0 < timeout_s:
+        sleep(15)
+        rows = engine_rows(site) or []
+        if len(rows) >= 2 and time.time() - rows[0][0] < 20 and rows[0][1].get("steps") != rows[1][1].get("steps"):
+            return rows[0]
+    return None
+
+
+def fix_engine(i: Issue, did: list[str]) -> bool | None:
+    r = actions.run("restart_engine", request_text="", target=i.target, auto=True)
+    did.append(f"restart the {i.target} engine: {_short(r)}")
+    if not r.get("ok"):
+        return False
+    h = wait_engine(i.target, 120)
+    if h:
+        did.append(f"verified: fresh heartbeat at {pt(h[0])}, steps {h[1].get('steps')} and moving")
+        return True
+    did.append("no moving heartbeat 2 min after the restart")
+    return False
+
+
+def report_engine_link(i: Issue, did: list[str]) -> bool | None:
+    r = remote.pod(f"""for p in $(pgrep -f -- 'ask.edge.main --camera {i.target}( |$)'); do
+  echo "edge pid $p: EDGE_ENGINE_URL=$(tr '\\0' '\\n' < /proc/$p/environ | sed -n 's/^EDGE_ENGINE_URL=//p')"; done
+tail -n 3 /workspace/edge/logs/edge-{i.target}.log | cut -c1-200""", timeout=25)
+    i.evidence += [ln for ln in r.get("out", "").splitlines() if ln.strip()][:5]
+    did.append("nothing: the edge -> engine post (EDGE_ENGINE_URL) is perception's/engine's; no allowlisted fix")
+    return False
+
+
+def report_info(i: Issue, did: list[str]) -> bool | None:
+    did.append("nothing to run: reported for the owners (engine / perception)")
+    return None if i.kind == "engineslow" else False
+
+
 PLAYBOOKS = {"cam": fix_camera, "node": fix_node, "tailscale": check_tailscale, "uv": report_uv,
-             "watcher": fix_watcher, "archiver": fix_archiver, "pod": report_pod}
+             "watcher": fix_watcher, "archiver": fix_archiver, "pod": report_pod,
+             "engine": fix_engine, "enginelink": report_engine_link, "engineslow": report_info, "judged": report_info}
 
 
 # ---------------------------------------------------------------------------------------------------------- reporting

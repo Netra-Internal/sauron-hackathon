@@ -22,6 +22,15 @@ TOOLS = {
     "pi_journal": (reads.pi_journal, "journal of one node unit: " + ", ".join(reads.PI_UNITS),
                    {"unit": {"type": "string"}, "lines": {"type": "integer", "default": 40},
                     "node": {"type": "string", "default": "demo-node"}}),
+    "engine_status": (reads.engine_status, "central site engine (ask.siteengine on the pod): newest heartbeat "
+                      "(per-camera last bucket age, steps, step ms), heartbeat count, pod processes, on-demand Jev "
+                      "(judged) /stats.", {"site": {"type": "string", "default": ""}}),
+    "decisions": (reads.decisions, "the site engine's decisions (severity, rule, plain-language text), newest first.",
+                  {"site": {"type": "string", "default": ""}, "hours": {"type": "number", "default": 24},
+                   "limit": {"type": "integer", "default": 20}}),
+    "explain_decision": (reads.explain_decision, "one engine decision in full: why[], rule, confidence, evidence "
+                         "(cameras, position, boxes), the site track, and whether it was forwarded as an incident.",
+                         {"decision_id": {"type": "string"}}),
     "incidents": (reads.bb_incidents, "Big Brother's own proactive incidents (what the watcher detected, did, and the result).",
                   {"n": {"type": "integer", "default": 10}}),
     "camera_health": (reads.camera_health, "production DB view of a camera: feed_health heartbeats (fps, frame age, "

@@ -18,6 +18,8 @@ PI_USER = os.environ.get("BB_PI_USER", "netra")
 NODES = dict(kv.split(":") for kv in os.environ.get("BB_NODES", "demo-node:2201 demo-node2:2202").split())
 CAMERAS = dict(kv.split(":") for kv in os.environ.get(
     "BB_CAMERAS", "demo-linovision:demo-node demo-linovision-2:demo-node2").split())
+# sites whose engine (python -m ask.siteengine --site <sid>) runs on the pod
+ENGINE_SITES = os.environ.get("BB_ENGINE_SITES", "ucsd-design-innovation-building-c1dd").split()
 POD_UNIT = os.environ.get("BB_POD_UNIT", "/etc/systemd/system/netra-ask-cloud-tunnel.service")
 
 

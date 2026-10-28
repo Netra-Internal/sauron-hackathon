@@ -225,3 +225,51 @@ def bb_incidents(n: int = 10) -> dict:
     """The proactive watcher's incident log (bigbrother/watch.py)."""
     path = os.path.join(os.environ.get("BB_STATE", "/var/lib/netra-bigbrother"), "incidents.jsonl")
     return {"file": path, "last": _tail_jsonl(path, min(int(n), 50))}
+
+
+def _site_ok(site: str) -> bool:
+    return site in remote.ENGINE_SITES
+
+
+def engine_status(site: str = "") -> dict:
+    """Site engine (ask.siteengine) health from the droplet DB + its pod processes + on-demand Jev (judged) /stats."""
+    site = site or remote.ENGINE_SITES[0]
+    if not _site_ok(site):
+        return {"error": f"unknown site; choose from {remote.ENGINE_SITES}"}
+    return {
+        "site": site,
+        "engine_health_newest": _psql(f"select received_at, now()-received_at as age, engine_version, policy_version, "
+                                      f"live_tracks, step_ms, health from engine_health where site_id='{site}' "
+                                      f"order by received_at desc limit 1"),
+        "heartbeats_last_10_min": _psql(f"select count(*) from engine_health where site_id='{site}' "
+                                        f"and received_at > now()-interval '10 minutes'"),
+        "pod": remote.pod(f"""ps -eo pid,etime,args | grep -E 'ask.siteengine|ask.perception.judged' | grep -v grep | cut -c1-160
+echo '--- judged /stats'; curl -s -m 5 http://127.0.0.1:8611/stats | cut -c1-1500; echo""", timeout=30),
+    }
+
+
+def decisions(site: str = "", hours: float = 24, limit: int = 20) -> dict:
+    """The engine's decisions (engine_decisions), newest first."""
+    site = site or remote.ENGINE_SITES[0]
+    if not _site_ok(site):
+        return {"error": f"unknown site; choose from {remote.ENGINE_SITES}"}
+    return {"site": site, "rows": _psql(
+        f"select id, decided_at, severity, level, confidence, status, rule_id, place, space, site_track_id, "
+        f"record->>'text' as text from engine_decisions where site_id='{site}' "
+        f"and decided_at > now()-interval '{float(hours)} hours' order by decided_at desc limit {min(int(limit), 50)}")}
+
+
+def explain_decision(decision_id: str) -> dict:
+    """One decision in full: the record (why[], text, evidence: cameras, position, boxes), the site track's path, and
+    whether it went out as a dispatch incident."""
+    if not decision_id.isalnum():
+        return {"error": "bad decision id"}
+    d = decision_id
+    return {
+        "record": _psql(f"select decided_at, t_start, severity, level, confidence, status, rule_id, policy_version, "
+                        f"record from engine_decisions where id='{d}'"),
+        "site_track": _psql(f"select t.id, t.t_start, t.t_end, t.state, t.cameras, t.conf "
+                            f"from site_tracks t join engine_decisions e on t.id = e.site_track_id where e.id='{d}'"),
+        "forwarded_incident": _psql(f"select id, status, verdict, why, opened_at from dispatch_incidents "
+                                    f"where id = 'eng-{d}' limit 1"),
+    }

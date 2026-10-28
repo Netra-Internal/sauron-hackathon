@@ -127,7 +127,7 @@ def test_cooldown():
 def test_every_runbook_action_is_a_fixed_script():
     assert {n for n, a in actions.ACTIONS.items() if a.kind == "safe"} == {
         "restart_push", "restart_tailscaled", "restart_pod_jev_watcher", "rerun_r2_archiver",
-        "restart_netra_ask", "restart_phonealert"}
+        "restart_netra_ask", "restart_phonealert", "restart_engine"}
     for a in actions.ACTIONS.values():
         assert a.where in ("node", "pod", "droplet") and a.script.strip()
     assert "{" not in actions.render(actions.ACTIONS["restart_pod_jev_watcher"], "demo-node", "demo-linovision") \
@@ -362,3 +362,75 @@ def test_unreachable_node_is_not_fixed():
         assert watch.fix_node(i, did) is False and "unreachable" in did[0]
     finally:
         watch.probe_node = watch_probe
+
+
+# --- engine / perception health (site/BIGBROTHER-ENGINE-HEALTH.md) -------------------------------------------------
+
+SITE = "ucsd-design-innovation-building-c1dd"
+
+
+def hrow(t, steps=100, cams=None, step_ms=40):
+    return (t, {"steps": steps, "step_ms_last": step_ms, "step_ms_max": step_ms,
+                "cameras": cams if cams is not None else {"demo-linovision": {"last_rx_age_s": 0.4, "buckets": 9}}})
+
+
+def test_engine_silent_until_deployed():
+    assert watch.engine_issues(SITE, None, {}, {}, {}, NOW) == []       # no table
+    assert watch.engine_issues(SITE, [], {}, {}, {}, NOW) == []         # no heartbeat in 24 h
+
+
+def test_engine_down_stuck_link_slow():
+    fh = {"demo-linovision": {"age_s": 5, "fps": 5, "beats": 18}}
+    pod = {"engine": [SITE], "judged": []}
+    down = watch.engine_issues(SITE, [hrow(NOW - 300)], fh, pod, {}, NOW)
+    assert [i.key for i in down] == [f"engine:{SITE}"] and "down" in down[0].title
+    stuck = watch.engine_issues(SITE, [hrow(NOW - 5, 100), hrow(NOW - 40, 100), hrow(NOW - 70, 100)], fh, pod, {}, NOW)
+    assert [i.title for i in stuck] == [f"site engine {SITE} stuck"]
+    moving = watch.engine_issues(SITE, [hrow(NOW - 5, 160), hrow(NOW - 70, 100)], fh, pod, {}, NOW)
+    assert moving == []
+    link = watch.engine_issues(SITE, [hrow(NOW - 5, 160, {"demo-linovision": {"last_rx_age_s": 300}})], fh, pod, {}, NOW)
+    assert [i.key for i in link] == ["enginelink:demo-linovision"]
+    # camera itself down -> that's the camera incident, not a link incident
+    assert watch.engine_issues(SITE, [hrow(NOW - 5, 160, {"demo-linovision": {"last_rx_age_s": 300}})],
+                               {"demo-linovision": {"age_s": 900, "fps": None, "beats": 0}}, pod, {}, NOW) == []
+    slow = watch.engine_issues(SITE, [hrow(NOW - 5, 160, step_ms=5000)], fh, pod, {}, NOW)
+    assert [i.kind for i in slow] == ["engineslow"]
+
+
+def test_judged_alert_only_after_it_was_seen():
+    st = {}
+    rows = [hrow(NOW - 5, 160)]
+    assert watch.engine_issues(SITE, rows, {}, {"engine": [SITE], "judged": []}, st, NOW) == []
+    assert watch.engine_issues(SITE, rows, {}, {"engine": [SITE], "judged": [SITE]}, st, NOW) == []
+    gone = watch.engine_issues(SITE, rows, {}, {"engine": [SITE], "judged": []}, st, NOW)
+    assert [i.key for i in gone] == [f"judged:{SITE}"]
+
+
+def test_merged_perception_is_not_a_missing_watcher(monkeypatch):
+    probe = {"now": NOW, "edge": ["demo-linovision"], "watch": [], "edge_jev": ["demo-linovision"],
+             "dispatch_cams": ["demo-linovision"], "archive_running": True, "archive": {}, "engine": [], "judged": []}
+    monkeypatch.setattr(watch.remote, "pod", lambda script, timeout=0: {"rc": 0, "out": json.dumps(probe), "err": ""})
+    issues, _ = watch.pod_issues(NOW)
+    assert issues == []
+    probe["edge_jev"] = []
+    issues, _ = watch.pod_issues(NOW)
+    assert [i.key for i in issues] == ["watcher:demo-linovision"]
+    s = actions.render(actions.ACTIONS["restart_pod_jev_watcher"], "demo-node", "demo-linovision")
+    assert "--jev on" in s and s.index("exit 5") < s.index("pkill")      # never starts a 2nd Jev next to a merged edge
+
+
+def test_restart_engine_gate_and_script():
+    calls = []
+    assert not actions.run("restart_engine", request_text="how is the engine?", execute=fake_exec(calls))["ok"]
+    assert not actions.run("restart_engine", request_text="restart it", target="other-site", execute=fake_exec(calls))["ok"]
+    assert calls == []
+    r = actions.run("restart_engine", request_text="restart the engine", execute=fake_exec(calls))
+    assert r["ok"] and r["target"] == SITE
+    s = actions.render(actions.ACTIONS["restart_engine"], "", SITE)
+    assert f"--site {SITE}" in s and "exit 6" in s and s.index("exit 6") < s.index("kill $pid")
+
+
+def test_engine_reads_refuse_bad_input():
+    assert "error" in reads.engine_status("x'; drop table engine_health;--")
+    assert "error" in reads.decisions("nope")
+    assert "error" in reads.explain_decision("1' or '1'='1")

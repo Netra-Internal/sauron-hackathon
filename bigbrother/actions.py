@@ -27,6 +27,9 @@ REBOOT_AFTER_S = 1200
 
 POD_JEV = """
 cd /workspace/edge
+if pgrep -f -- 'ask.edge.main --camera {cam} .*--jev on' >/dev/null; then
+  echo "{cam}: Jev runs inside the edge (ask.edge.main --jev on, perception): no separate watcher to restart"; exit 5
+fi
 loop=$(pgrep -f '^bash cloud/pod/dispatch.sh {cam}$')
 echo "loop pid: ${loop:-none}"
 pkill -f -- '-m ask.dispatch.watch --camera {cam} ' && echo "killed watcher; the loop restarts it in 15 s"
@@ -57,6 +60,18 @@ pgrep -af 'cloud/pod/archive.py$'
 tail -n 4 logs/archive.log
 """
 
+ENGINE = """
+pat='-m ask.siteengine --site {site}( |$)'
+pid=$(pgrep -f -- "$pat" | head -1); [ -z "$pid" ] && { sleep 10; pid=$(pgrep -f -- "$pat" | head -1); }
+[ -n "$pid" ] || { echo "no engine process for {site} and nothing restarted it: launching it is cloudpod's (supervise.py/boot.sh)"; exit 5; }
+parent=$(ps -o args= -p "$(ps -o ppid= -p $pid | tr -d ' ')")
+echo "engine pid $pid, parent: $parent"
+case "$parent" in *supervise.py*|bash*) ;; *) echo "parent is not a restart loop: not killing it"; exit 6;; esac
+kill $pid && echo "stopped the engine; its restart loop starts it again"
+sleep 25
+pgrep -af -- "$pat" || echo "engine NOT back after 25 s"
+"""
+
 REBOOT = """
 fs=$(findmnt -n -o FSTYPE /)
 [ "$fs" = overlay ] || { echo "root filesystem is '$fs', not the overlay root: refusing to reboot"; exit 4; }
@@ -76,7 +91,7 @@ journalctl -u {unit} -n 6 --no-pager -o short-iso"""
 class Action:
     kind: str                    # "safe" | "confirm"
     where: str                   # "node" | "pod" | "droplet"
-    target: str                  # "node" | "camera" | "" (fills {node} / {cam} in the script)
+    target: str                  # "node" | "camera" | "site" | "" (fills {node} / {cam} / {site} in the script)
     what: str
     script: str
     prefer: str = "tailnet"      # node route
@@ -98,6 +113,8 @@ ACTIONS: dict[str, Action] = {
         _droplet_restart("netra-ask", "sleep 3; curl -s -o /dev/null -w 'GET /ask/ -> %{http_code}\\n' http://127.0.0.1:8400/ask/")),
     "restart_phonealert": Action("safe", "droplet", "", "restart netra-phonealert on the droplet",
         _droplet_restart("netra-phonealert")),
+    "restart_engine": Action("safe", "pod", "site", "restart the {site} site engine on the pod (kill it; its restart "
+        "loop starts it again and it recovers from snapshots)", ENGINE),
     # --- need William's "yes" (reboot_node: or the watcher, after a failed push restart) ---
     "reboot_node": Action("confirm", "node", "node", "reboot {node} (overlay root; its camera feed drops ~1-2 min)", REBOOT),
     "restart_pod_tunnels": Action("confirm", "droplet", "",
@@ -116,11 +133,15 @@ def resolve_target(a: Action, target: str) -> tuple[str, str] | None:
     if a.target == "camera":
         target = target or "demo-linovision"
         return (remote.CAMERAS.get(target, ""), target) if target in remote.CAMERAS else None
+    if a.target == "site":
+        target = target or remote.ENGINE_SITES[0]
+        return ("", target) if target in remote.ENGINE_SITES else None
     return ("", "")
 
 
 def render(a: Action, node: str, cam: str) -> str:
-    return a.script.replace("{node}", node).replace("{cam}", cam)
+    """cam carries the site id for site actions."""
+    return a.script.replace("{node}", node).replace("{cam}", cam).replace("{site}", cam)
 
 
 def _execute(a: Action, node: str, cam: str) -> dict:
@@ -166,10 +187,10 @@ def run(name: str, *, request_text: str, target: str = "", confirmed: bool = Fal
     t = resolve_target(a, target)
     if t is None:
         return {"ok": False, "action": name, "refused": f"unknown target {target!r}; nodes {sorted(remote.NODES)}, "
-                f"cameras {sorted(remote.CAMERAS)}; nothing was run"}
+                f"cameras {sorted(remote.CAMERAS)}, sites {remote.ENGINE_SITES}; nothing was run"}
     node, cam = t
     key = f"{name}:{cam or node}" if a.target else name
-    what = a.what.replace("{node}", node).replace("{cam}", cam)
+    what = a.what.replace("{node}", node).replace("{cam}", cam).replace("{site}", cam)
     cooldown = _load("cooldown.json", {})
     if name == "reboot_node":
         if not confirmed:
@@ -207,7 +228,7 @@ def propose(name: str, reason: str, target: str = "", *, now: float | None = Non
         return {"ok": False, "refused": f"unknown target {target!r}"}
     node, cam = t
     p = {"id": uuid.uuid4().hex[:8], "action": name, "target": cam or node,
-         "what": a.what.replace("{node}", node).replace("{cam}", cam), "reason": reason, "at": now}
+         "what": a.what.replace("{node}", node).replace("{cam}", cam).replace("{site}", cam), "reason": reason, "at": now}
     _save("pending.json", p)
     return {"ok": True, "pending": p, "note": "The bot will ask William to reply 'yes' within 10 min."}
 

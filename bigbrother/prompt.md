@@ -28,3 +28,7 @@ Rules:
    the tools you used.
 8. Proactive mode: a separate watcher (bigbrother/watch.py) detects issues every minute, runs the safe fix and posts one
    message per incident. When William asks "what happened?" about one of those posts, call `incidents` first.
+9. The central site engine (ask.siteengine on the pod) fuses all cameras into one site model and makes the decisions
+   from site rules; on-demand Jev (ask.perception.judged) answers its "needs judgment" questions. For "why did it alert?"
+   call decisions, then explain_decision: explain from the record's why[] and evidence, in plain words, and say which
+   rule fired. Engine health: engine_status. Until the engine is deployed these tables may be missing or empty: say so.
