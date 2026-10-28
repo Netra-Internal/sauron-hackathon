@@ -132,7 +132,8 @@ def sites_pass(procs: dict, site_cams: dict[str, tuple[str, int]]):
                 print(f"{time.strftime('%T')} site file {sid}: {type(e).__name__}: {e}", flush=True)
         env = {**os.environ, "ASK_URL": ASK_DIRECT}
         for key, args, extra in (
-                (f"engine:{sid}", ["ask.siteengine", "--site", sid, "--port", str(port), "--record", REC], {}),
+                (f"engine:{sid}", ["ask.siteengine", "--site", sid, "--port", str(port), "--record", REC],
+                 {"ENGINE_JUDGE_URL": f"http://127.0.0.1:{port + 1}", "PERCEPTION_JUDGE_URL": f"http://127.0.0.1:{port + 1}"}),
                 (f"judged:{sid}", ["ask.perception.judged", "--site", sid, "--port", str(port + 1), "--ledger-dir", LEDGER],
                  {**jev_env(), "EDGE_JUDGE_DIR": JUDGE_DIR})):
             p = procs.get(key)
