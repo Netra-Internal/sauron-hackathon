@@ -5,8 +5,9 @@ The stack:
 - Camera nodes (Raspberry Pis, solar): demo-node pushes demo-linovision, demo-node2 pushes demo-linovision-2. netra-cloud-push sends the camera's video
   to the cloud GPU pod. Watchdogs restart tailscaled / Wi-Fi; nodeguard (on the droplet) records its reports and events and
   posts 🔧/⚠️ messages to this channel. A reverse-SSH tunnel reaches it when Tailscale is down.
-- The cloud pod (RunPod GPU): mediamtx ingest, the edge detector (feed_health), the Jev dispatch watcher (judge VLM, costs
-  money per strip), and the archiver that copies footage to R2.
+- The cloud pod (RunPod GPU): mediamtx ingest; per camera ONE edge (ask.edge.main --jev on: detector, tracker, the Jev
+  judge VLM, costs money per strip, feed_health); per site the engine (ask.siteengine) and on-demand Jev
+  (ask.perception.judged); the archiver that copies footage to R2. The old separate dispatch watchers are retired.
 - The droplet: netra-ask (internal.netralabs.net/ask: DB, incidents), netra-phonealert (phone @mention on incidents), the
   SSH tunnels to the pod.
 

@@ -25,20 +25,6 @@ PENDING_TTL_S = 600
 REBOOT_EVERY_S = 1800
 REBOOT_AFTER_S = 1200
 
-POD_JEV = """
-cd /workspace/edge
-if pgrep -f -- 'ask.edge.main --camera {cam} .*--jev on' >/dev/null; then
-  echo "{cam}: Jev runs inside the edge (ask.edge.main --jev on, perception): no separate watcher to restart"; exit 5
-fi
-loop=$(pgrep -f '^bash cloud/pod/dispatch.sh {cam}$')
-echo "loop pid: ${loop:-none}"
-pkill -f -- '-m ask.dispatch.watch --camera {cam} ' && echo "killed watcher; the loop restarts it in 15 s"
-if [ -z "$loop" ]; then setsid nohup bash cloud/pod/dispatch.sh {cam} >/dev/null 2>&1 </dev/null & echo "started a new dispatch.sh loop"; fi
-sleep 25
-pgrep -af 'dispatch.*{cam}( |$)'
-tail -n 4 logs/dispatch-{cam}.log
-"""
-
 POD_ARCHIVE = """
 cd /workspace/edge
 [ -s archive_cams ] || { echo "archive_cams is empty: nothing to archive"; exit 3; }
@@ -105,8 +91,6 @@ ACTIONS: dict[str, Action] = {
         "sudo systemctl restart --no-block tailscaled; sleep 10; systemctl is-active tailscaled; "
         "tailscale status --json 2>/dev/null | python3 -c 'import json,sys; print(\"BackendState\", json.load(sys.stdin)[\"BackendState\"])'",
         prefer="rev"),
-    "restart_pod_jev_watcher": Action("safe", "pod", "camera", "restart the {cam} Jev dispatch watcher on the pod "
-        "(kill the watcher, its dispatch.sh loop restarts it; start the loop if it is gone)", POD_JEV),
     "rerun_r2_archiver": Action("safe", "pod", "", "re-run the pod -> R2 footage archiver now (fresh pass; resumes from "
         "its done-list)", POD_ARCHIVE),
     "restart_netra_ask": Action("safe", "droplet", "", "restart netra-ask on the droplet",

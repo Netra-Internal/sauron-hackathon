@@ -7,7 +7,10 @@ Runs as netra-bigbrother-watch.service, one pass every INTERVAL_S. Detection is 
 - nodeguard events.jsonl (read from a byte cursor): tailscale watchdog restarts, under-voltage throttle bits.
 - feed_health (netra_ask DB) for every camera in remote.CAMERAS: no heartbeat for STALE_S, or mean fps_analysed over the
   last FPS_WINDOW_S below LOW_FPS (the live target is 5).
-- the pod: unreachable, a Jev watcher missing for a watched camera, the R2 archiver not running or not progressing.
+- the pod: unreachable; per camera an edge with --jev on (detect + track + Jev); per site ask.siteengine and
+  ask.perception.judged running, engine heartbeats moving; the R2 archiver not running or not progressing.
+A state issue must persist PERSIST_S (5 min) before any fix or post; maintenance-<scope> flags silence planned work; a fix
+that doesn't apply (target missing) is logged, never posted as "could not fix".
 Fixes go through actions.run(auto=True), so the runbook gates (cooldowns, reboot only after a failed push restart, max
 1 reboot / 30 min / node, overlay root) apply here too. Each incident has a key (e.g. cam:demo-linovision-2); while it stays
 open it is not posted again; it is retried at most MAX_ATTEMPTS times, RETRY_S apart. Everything goes to log.jsonl and
@@ -42,7 +45,10 @@ MAX_VALID_FPS = 30            # feed_health can report bursts (295 fps after a r
 CLOSE_AFTER_CLEAR = 2         # passes without the issue before an incident closes
 MAX_POSTS_PER_HOUR = 6
 # incident kinds that mean "infra down"; uv (power warning) and engineslow are logged, never posted
-POST_KINDS = {"cam", "node", "tailscale", "watcher", "archiver", "pod", "engine", "enginelink", "judged"}
+POST_KINDS = {"cam", "node", "edge", "archiver", "pod", "engine", "enginelink", "judged"}
+EVENT_KINDS = {"tailscale", "uv"}       # point events: checked at once, never posted (a lasting outage is a state issue)
+PERSIST_S = 300                         # a state issue must be seen continuously this long before any fix or post
+MAINT_DEFAULT_S = 7200                  # an empty maintenance file counts for 2 h from its mtime
 EVENT_MERGE_S = {"tailscale": 3600, "uv": 12 * 3600}
 ARCHIVE_STALE_S = 9000        # the archiver passes hourly: a segment still not in R2 after 2.5 h = stalled
 PT = ZoneInfo("America/Los_Angeles")
@@ -51,7 +57,7 @@ PT = ZoneInfo("America/Los_Angeles")
 @dataclass
 class Issue:
     key: str                  # incident identity, e.g. "cam:demo-linovision-2", "node:demo-node", "tailscale:demo-node"
-    kind: str                 # cam | node | tailscale | uv | watcher | archiver | pod
+    kind: str                 # cam | node | tailscale | uv | edge | archiver | pod | engine | enginelink | engineslow | judged
     target: str               # camera or node id ("" for pod/archiver)
     title: str
     evidence: list[str] = field(default_factory=list)
@@ -184,11 +190,11 @@ for c in rd("archive_cams"):
     elig = [os.path.getmtime(seg[k + 2]) for k in range(len(seg) - 2) if os.path.basename(seg[k]) not in done]
     arch[c] = {"pending": len(elig), "oldest_pending": min(elig) if elig else None}
 site = lambda pat: sorted({l.split("--site")[1].split()[0] for l in ps if pat in l and "--site" in l})
-print(json.dumps({"now": time.time(), "edge": cams("ask.edge.main"), "watch": cams("ask.dispatch.watch"),
+print(json.dumps({"now": time.time(), "edge": cams("ask.edge.main"),
                   "edge_jev": sorted({l.split("--camera")[1].split()[0] for l in ps
                                       if "ask.edge.main" in l and "--camera" in l and "--jev on" in l}),
                   "engine": site("-m ask.siteengine"), "judged": site("-m ask.perception.judged"),
-                  "dispatch_cams": rd("dispatch_cams"), "archive_running": any(l.endswith("cloud/pod/archive.py") for l in ps),
+                  "archive_running": any(l.endswith("cloud/pod/archive.py") for l in ps),
                   "archive": arch}))
 EOF"""
 
@@ -201,12 +207,22 @@ def pod_issues(now: float) -> tuple[list[Issue], dict]:
         return [Issue("pod", "pod", "", "cloud pod unreachable",
                       [f"ssh to the pod failed (rc {r.get('rc')}): {r.get('err', '').strip()[-200:]}"])], {}
     out = []
+    # architecture since Oct 28 20:47 UTC: per camera ONE edge (ask.edge.main --jev on: detect, track, Jev); per site
+    # ask.siteengine + ask.perception.judged. (The separate ask.dispatch.watch watchers are retired: not checked.)
     for cam in remote.CAMERAS:
-        # Jev runs either in a dispatch.sh watcher (today) or inside the edge with --jev on (perception, P3)
-        if cam in p["dispatch_cams"] and cam not in p["watch"] and cam not in p.get("edge_jev", []):
-            out.append(Issue(f"watcher:{cam}", "watcher", cam, f"{cam} Jev dispatch watcher not running",
-                             [f"pod: {cam} is in dispatch_cams but no ask.dispatch.watch process and no edge with "
-                              f"--jev on (watchers: {p['watch']}, edges: {p['edge']})"]))
+        if cam not in p["edge"]:
+            out.append(Issue(f"edge:{cam}", "edge", cam, f"{cam} edge not running on the pod",
+                             [f"pod: no ask.edge.main --camera {cam} process (edges running: {p['edge']})"]))
+        elif cam not in p.get("edge_jev", []):
+            out.append(Issue(f"edge:{cam}", "edge", cam, f"{cam} edge runs without Jev",
+                             [f"pod: ask.edge.main --camera {cam} is running without --jev on, so nothing judges it"]))
+    for site in remote.ENGINE_SITES:
+        if site not in p.get("engine", []):
+            out.append(Issue(f"engine:{site}", "engine", site, f"site engine {site} not running",
+                             [f"pod: no ask.siteengine --site {site} process"]))
+        if site not in p.get("judged", []):
+            out.append(Issue(f"judged:{site}", "judged", site, f"on-demand Jev (judged) for {site} not running",
+                             [f"pod: no ask.perception.judged --site {site} process"]))
     stale = [c for c, a in p["archive"].items()
              if a["oldest_pending"] and p["now"] - a["oldest_pending"] > ARCHIVE_STALE_S]
     if p["archive"] and (not p["archive_running"] or stale):
@@ -241,8 +257,6 @@ def engine_issues(site: str, rows: list | None, fh: dict, pod: dict, state: dict
     """Only once the engine has run in the last 24 h (no rows = not deployed / switched off on purpose: silent)."""
     out = []
     seen = state.setdefault("seen", {})
-    if pod and site in pod.get("judged", []):
-        seen[f"judged:{site}"] = True
     if not rows:
         return out
     t0, h = rows[0]
@@ -269,10 +283,6 @@ def engine_issues(site: str, rows: list | None, fh: dict, pod: dict, state: dict
         out.append(Issue(f"engineslow:{site}", "engineslow", site, f"site engine {site} slow",
                          [f"engine_health: step_ms_last {h['step_ms_last']}, max {h.get('step_ms_max')} "
                           f"(budget {STEP_BUDGET_MS} ms camera -> decision)"]))
-    if pod and site in pod.get("engine", []) and site not in pod.get("judged", []) and seen.get(f"judged:{site}"):
-        out.append(Issue(f"judged:{site}", "judged", site, f"on-demand Jev (judged) for {site} not running",
-                         [f"pod: ask.perception.judged --site {site} was running before and is gone; the engine's "
-                          f"needs_judgment rules get no Jev answers"]))
     return out
 
 
@@ -288,7 +298,13 @@ def detect(state: dict, now: float) -> tuple[list[Issue], dict]:
     eng = []
     for site in remote.ENGINE_SITES:
         eng += engine_issues(site, engine_rows(site), fh, probe, state, now)
-    issues = node_issues(states, now) + camera_issues(fh, states, now) + event_issues(events) + pod + eng
+    merged: dict[str, Issue] = {}
+    for i in node_issues(states, now) + camera_issues(fh, states, now) + event_issues(events) + pod + eng:
+        if i.key in merged:
+            merged[i.key].evidence += i.evidence
+        else:
+            merged[i.key] = i
+    issues = list(merged.values())
     return issues, {"feed": fh, "pod": probe, "nodes": {n: {k: s.get(k) for k in ("node", "video", "video_since")}
                                                         for n, s in states.items()}}
 
@@ -347,6 +363,10 @@ def fix_camera(i: Issue, did: list[str]) -> bool | None:
         return False
     r = actions.run("restart_push", request_text="", target=node, auto=True)
     did.append(f"restart netra-cloud-push on {node}: {_short(r)}")
+    na = not_applicable(r)
+    if na:
+        did.append(f"not applicable, logged only: {na}")
+        return None
     if r.get("ok"):
         nodeguard_note(node, f"Big Brother restarted netra-cloud-push ({i.title})")
     f = wait_feed(cam, 150)
@@ -411,17 +431,21 @@ def report_uv(i: Issue, did: list[str]) -> bool | None:
     return False
 
 
-def fix_watcher(i: Issue, did: list[str]) -> bool | None:
-    r = actions.run("restart_pod_jev_watcher", request_text="", target=i.target, auto=True)
-    did.append(f"restart the {i.target} Jev watcher: {_short(r)}")
-    ok = bool(r.get("ok")) and f"--camera {i.target}" in r.get("out", "")
-    did.append("verified: watcher process running" if ok else "watcher process not seen after the restart")
-    return ok
+def report_edge(i: Issue, did: list[str]) -> bool | None:
+    r = remote.pod(f"tail -n 4 /workspace/edge/logs/supervise.log | cut -c1-200; "
+                   f"tail -n 3 /workspace/edge/logs/edge-{i.target}.log | cut -c1-200", timeout=25)
+    i.evidence += [ln for ln in r.get("out", "").splitlines() if ln.strip()][:6]
+    did.append("nothing: the pod supervisor (supervise.py) starts edges; restarting it is cloudpod's call")
+    return False
 
 
 def fix_archiver(i: Issue, did: list[str]) -> bool | None:
     r = actions.run("rerun_r2_archiver", request_text="", auto=True)
     did.append(f"re-run the R2 archiver: {_short(r)}")
+    na = not_applicable(r)
+    if na:
+        did.append(f"not applicable, logged only: {na}")
+        return None
     ok = bool(r.get("ok")) and "cloud/pod/archive.py" in r.get("out", "").split("stopped archive.py")[-1]
     did.append("verified: archive.py running a fresh pass" if ok else "archive.py not seen running after the re-run")
     return ok
@@ -447,6 +471,10 @@ def wait_engine(site: str, timeout_s: int, sleep=time.sleep) -> tuple | None:
 def fix_engine(i: Issue, did: list[str]) -> bool | None:
     r = actions.run("restart_engine", request_text="", target=i.target, auto=True)
     did.append(f"restart the {i.target} engine: {_short(r)}")
+    na = not_applicable(r)
+    if na:
+        did.append(f"not applicable, logged only: {na}")
+        return None
     if not r.get("ok"):
         return False
     h = wait_engine(i.target, 120)
@@ -472,7 +500,7 @@ def report_info(i: Issue, did: list[str]) -> bool | None:
 
 
 PLAYBOOKS = {"cam": fix_camera, "node": fix_node, "tailscale": check_tailscale, "uv": report_uv,
-             "watcher": fix_watcher, "archiver": fix_archiver, "pod": report_pod,
+             "edge": report_edge, "archiver": fix_archiver, "pod": report_pod,
              "engine": fix_engine, "enginelink": report_engine_link, "engineslow": report_info, "judged": report_info}
 
 
@@ -500,6 +528,52 @@ def post(text: str, mention: bool) -> dict:
             return {"status": r.status, "id": json.loads(r.read()).get("id")}
     except Exception as e:                                         # a failed post must not stop the watcher
         return {"status": getattr(e, "code", None), "error": str(e)[:300]}
+
+
+# ------------------------------------------------------------------------------------------- maintenance
+def scopes(i: Issue) -> set[str]:
+    """What a maintenance flag must name to cover this issue ("all" always does)."""
+    node = node_of(i)
+    out = {"all"}
+    if i.kind in ("cam", "edge", "enginelink"):
+        out |= {i.target, "pod"} | ({node} if node else set())
+    elif i.kind in ("node", "tailscale", "uv"):
+        out |= {i.target}
+    elif i.kind in ("engine", "engineslow", "judged"):
+        out |= {i.target, "pod", "engine"}
+    elif i.kind in ("archiver", "pod"):
+        out |= {"pod"}
+    return out
+
+
+def maintenance(i: Issue, now: float) -> dict | None:
+    """Planned work: a file maintenance-<scope> in Big Brother's state dir (set by integrate / cloudpod / nodeguard
+    during deploys), JSON {"until": iso|epoch, "by", "reason"}; empty = MAINT_DEFAULT_S from its mtime. Scope = all,
+    pod, engine, a node, a camera or a site id. While it holds: no fixes, no posts (logged)."""
+    for sc in scopes(i):
+        p = os.path.join(STATE, f"maintenance-{sc}")
+        if not os.path.exists(p):
+            continue
+        try:
+            m = json.loads(open(p).read() or "{}")
+        except ValueError:
+            m = {}
+        u = m.get("until")
+        until = (u if isinstance(u, (int, float)) else datetime.fromisoformat(u).timestamp()) if u \
+            else os.path.getmtime(p) + MAINT_DEFAULT_S
+        if now < until:
+            return {"file": p, "until": until, **m}
+    return None
+
+
+def not_applicable(r: dict) -> str | None:
+    """An EXPECTED failure of a fix (its target doesn't exist / doesn't apply): never 'could not fix', log only."""
+    if r.get("rc") in (5, 6):
+        return (r.get("out", "") + r.get("err", "")).strip().splitlines()[-1][:200] if (r.get("out") or r.get("err")) \
+            else "not applicable"
+    if "refused" in r and ("unknown target" in r["refused"] or "allowlist" in r["refused"]):
+        return r["refused"]
+    return None
 
 
 # ------------------------------------------------------------------------------------------- holds and root cause
@@ -533,7 +607,7 @@ def recent_push_health(node: str, events: list[dict], now: float) -> dict | None
 
 
 def node_of(i: Issue) -> str:
-    return remote.CAMERAS.get(i.target, "") if i.kind in ("cam", "watcher", "enginelink") else \
+    return remote.CAMERAS.get(i.target, "") if i.kind in ("cam", "edge", "enginelink") else \
         (i.target if i.kind in ("node", "tailscale", "uv") else "")
 
 
@@ -601,7 +675,21 @@ def run_pass(state: dict, now: float, handle=None, poster=post) -> list[dict]:
     seen = {i.key for i in issues}
     done = []
     state["posts"] = [t for t in state.get("posts", []) if now - t < 3600]
+    first = state.setdefault("first_seen", {})
+    for k in list(first):
+        if k not in seen:
+            del first[k]                                           # cleared for a pass: persistence starts over
     for i in issues:
+        m = maintenance(i, now)
+        if m:
+            first.pop(i.key, None)                                 # after maintenance, persistence starts over
+            if state.setdefault("blocked_logged", {}).get(i.key) != m["file"]:
+                state["blocked_logged"][i.key] = m["file"]
+                log.write({"kind": "auto_maintenance", "key": i.key, "flag": m, "evidence": i.evidence})
+            continue
+        first.setdefault(i.key, now)
+        if i.kind not in EVENT_KINDS and now - first[i.key] < PERSIST_S and i.key not in state["open"]:
+            continue                                               # not yet persistent (5 min): no fix, no post
         inc = state["open"].get(i.key)
         d = decide(inc, now, i.kind)
         if d == "skip":

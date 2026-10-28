@@ -1,5 +1,6 @@
 """Big Brother: who it obeys (policy), what it may change (actions), the MCP tool gate, and the thank-you joke."""
 import json
+import os
 
 import pytest
 
@@ -126,12 +127,11 @@ def test_cooldown():
 
 def test_every_runbook_action_is_a_fixed_script():
     assert {n for n, a in actions.ACTIONS.items() if a.kind == "safe"} == {
-        "restart_push", "restart_tailscaled", "restart_pod_jev_watcher", "rerun_r2_archiver",
+        "restart_push", "restart_tailscaled", "rerun_r2_archiver",
         "restart_netra_ask", "restart_phonealert", "restart_engine"}
     for a in actions.ACTIONS.values():
         assert a.where in ("node", "pod", "droplet") and a.script.strip()
-    assert "{" not in actions.render(actions.ACTIONS["restart_pod_jev_watcher"], "demo-node", "demo-linovision") \
-        .replace("${loop:-none}", "")
+    assert "restart_pod_jev_watcher" not in actions.ACTIONS          # retired with the dispatch watchers (Oct 28)
 
 
 # --- the MCP gate Claude goes through ------------------------------------------------------------------------------
@@ -190,8 +190,7 @@ def test_pod_target_from_tunnel_unit():
 def test_targets_are_from_the_fixed_lists():
     calls = []
     assert not actions.run("restart_push", request_text="fix it", target="evil; rm -rf /", execute=fake_exec(calls))["ok"]
-    assert not actions.run("restart_pod_jev_watcher", request_text="fix it", target="axis-q6215",
-                           execute=fake_exec(calls))["ok"]
+    assert not actions.run("restart_engine", request_text="fix it", target="axis-q6215", execute=fake_exec(calls))["ok"]
     assert calls == []
     r = actions.run("restart_push", request_text="fix it", target="demo-node2", execute=fake_exec(calls))
     assert r["ok"] and r["target"] == "demo-node2"
@@ -290,8 +289,11 @@ def test_message_mentions_only_when_not_fixed():
     assert len(watch.message(i, ["x" * 3000], False, "42")[0]) <= 1901
 
 
-def run(monkeypatch, issues_seq, results, now0=NOW):
-    """Drive run_pass with canned detections; returns (posts, state)."""
+def run(monkeypatch, issues_seq, results, now0=NOW, warmup=True):
+    """Drive run_pass with canned detections; returns (posts, state). warmup: the first detection set is repeated for
+    PERSIST_S first (issues must persist 5 min before any fix or post)."""
+    if warmup and issues_seq:
+        issues_seq = [issues_seq[0]] * (watch.PERSIST_S // 60) + list(issues_seq)
     posts, state = [], {"open": {}, "posts": []}
     for n, issues in enumerate(issues_seq):
         monkeypatch.setattr(watch, "detect", lambda s, now, iss=issues: ([watch.Issue(**i) for i in iss], {}))
@@ -334,7 +336,7 @@ def test_degrades_again_within_2h_needs_root_cause(monkeypatch):
         calls.append(i.key)
         return True
     posts, state = [], {"open": {}, "posts": []}
-    seq = [[CAM], [], [], [CAM]] + [[CAM], [], []] * 20               # fixed, clears, back 3 min later, flaps for 1 h
+    seq = [[CAM]] * 6 + [[], []] + [[CAM]] * 7 + [[CAM], [], []] * 20  # 6 min down, fixed, back 2 min later for 7 min
     for n, issues in enumerate(seq):
         monkeypatch.setattr(watch, "detect", lambda s, now, iss=issues: ([watch.Issue(**i) for i in iss], {}))
         watch.run_pass(state, NOW + n * 60, handle=handle, poster=lambda t, m: posts.append((t, m)))
@@ -378,14 +380,19 @@ def test_burst_fps_is_not_proof_of_health(monkeypatch):
     assert watch.wait_feed("demo-linovision-2", 100, sleep=lambda s: None)["fps"] == 5.1
 
 
-def test_tailscale_events_merge_within_an_hour(monkeypatch):
+def test_tailscale_events_are_checked_but_never_posted(monkeypatch):
     ts = dict(key="tailscale:demo-node", kind="tailscale", target="demo-node", title="ts", evidence=[])
-    posts, _ = run(monkeypatch, [[ts], [], [ts], [], [ts]], {ts["key"]: False})
-    assert len(posts) == 1
+    calls = []
+    posts, state = [], {"open": {}, "posts": []}
+    for n, iss in enumerate([[ts], [], [ts], [], [ts]]):
+        monkeypatch.setattr(watch, "detect", lambda s, now, iss=iss: ([watch.Issue(**i) for i in iss], {}))
+        watch.run_pass(state, NOW + n * 60, handle=lambda i, d: calls.append(1) or False,
+                       poster=lambda t, m: posts.append(t))
+    assert len(calls) == 1 and posts == []                             # checked at once, merged, log only
 
 
 def test_post_rate_limit(monkeypatch):
-    many = [dict(key=f"watcher:c{n}", kind="watcher", target=f"c{n}", title="w", evidence=[]) for n in range(10)]
+    many = [dict(key=f"edge:c{n}", kind="edge", target=f"c{n}", title="w", evidence=[]) for n in range(10)]
     posts, _ = run(monkeypatch, [many], {m["key"]: False for m in many})
     assert len(posts) == watch.MAX_POSTS_PER_HOUR
 
@@ -461,26 +468,18 @@ def test_engine_down_stuck_link_slow():
     assert [i.kind for i in slow] == ["engineslow"]
 
 
-def test_judged_alert_only_after_it_was_seen():
-    st = {}
-    rows = [hrow(NOW - 5, 160)]
-    assert watch.engine_issues(SITE, rows, {}, {"engine": [SITE], "judged": []}, st, NOW) == []
-    assert watch.engine_issues(SITE, rows, {}, {"engine": [SITE], "judged": [SITE]}, st, NOW) == []
-    gone = watch.engine_issues(SITE, rows, {}, {"engine": [SITE], "judged": []}, st, NOW)
-    assert [i.key for i in gone] == [f"judged:{SITE}"]
-
-
-def test_merged_perception_is_not_a_missing_watcher(monkeypatch):
-    probe = {"now": NOW, "edge": ["demo-linovision"], "watch": [], "edge_jev": ["demo-linovision"],
-             "dispatch_cams": ["demo-linovision"], "archive_running": True, "archive": {}, "engine": [], "judged": []}
+def test_pod_checks_match_the_new_architecture(monkeypatch):
+    probe = {"now": NOW, "edge": ["demo-linovision", "demo-linovision-2"], "edge_jev": ["demo-linovision", "demo-linovision-2"],
+             "engine": [SITE], "judged": [SITE], "archive_running": True, "archive": {}}
     monkeypatch.setattr(watch.remote, "pod", lambda script, timeout=0: {"rc": 0, "out": json.dumps(probe), "err": ""})
-    issues, _ = watch.pod_issues(NOW)
-    assert issues == []
-    probe["edge_jev"] = []
-    issues, _ = watch.pod_issues(NOW)
-    assert [i.key for i in issues] == ["watcher:demo-linovision"]
-    s = actions.render(actions.ACTIONS["restart_pod_jev_watcher"], "demo-node", "demo-linovision")
-    assert "--jev on" in s and s.index("exit 5") < s.index("pkill")      # never starts a 2nd Jev next to a merged edge
+    assert watch.pod_issues(NOW)[0] == []                               # no dispatch.watch anywhere: healthy
+    probe["edge"], probe["edge_jev"] = ["demo-linovision-2"], ["demo-linovision-2"]
+    probe["judged"] = []
+    assert sorted(i.key for i in watch.pod_issues(NOW)[0]) == ["edge:demo-linovision", f"judged:{SITE}"]
+    probe["edge"] = ["demo-linovision", "demo-linovision-2"]
+    iss = watch.pod_issues(NOW)[0]
+    assert any(i.key == "edge:demo-linovision" and "without Jev" in i.title for i in iss)
+    assert "dispatch" not in watch.POD_PROBE
 
 
 def test_restart_engine_gate_and_script():
@@ -537,3 +536,46 @@ def test_new_tools_are_listed():
     assert {"bike_log", "site_shapes", "calibration", "zone_activity"} <= names
     desc = next(t for t in mcp_server.tool_list() if t["name"] == "bike_log")["description"]
     assert "login" in desc and "PARK" in desc and "TAKE" in desc
+
+
+def test_brief_flaps_never_act_or_post(monkeypatch):
+    calls = []
+    posts, state = [], {"open": {}, "posts": []}
+    for n, iss in enumerate(([[CAM]] * 4 + [[]]) * 12):                # down 4 min, up 1 min, for an hour
+        monkeypatch.setattr(watch, "detect", lambda s, now, iss=iss: ([watch.Issue(**i) for i in iss], {}))
+        watch.run_pass(state, NOW + n * 60, handle=lambda i, d: calls.append(1) or False,
+                       poster=lambda t, m: posts.append(t))
+    assert calls == [] and posts == []
+
+
+def test_maintenance_flag_silences_and_restarts_persistence(monkeypatch, tmp_path):
+    edge = dict(key="edge:demo-linovision", kind="edge", target="demo-linovision", title="edge down", evidence=[])
+    flag = tmp_path / "maintenance-pod"
+    flag.write_text(json.dumps({"until": NOW + 600, "by": "cloudpod", "reason": "rolling restart"}))
+    calls, posts, state = [], [], {"open": {}, "posts": []}
+    monkeypatch.setattr(watch, "detect", lambda s, now: ([watch.Issue(**edge)], {}))
+    for n in range(15):                                                 # flag 10 min, then 5 more min down
+        watch.run_pass(state, NOW + n * 60, handle=lambda i, d: calls.append(n) or False,
+                       poster=lambda t, m: posts.append(t))
+    assert calls == [] and posts == []                                  # 5 min after the flag ended: not yet
+    watch.run_pass(state, NOW + 15 * 60, handle=lambda i, d: calls.append(15) or False,
+                   poster=lambda t, m: posts.append(t))
+    assert calls == [15] and len(posts) == 1
+    # scopes: a camera flag covers its camera, a node flag its cameras, "all" everything
+    i = watch.Issue(**CAM)
+    assert {"all", "demo-linovision-2", "demo-node2", "pod"} <= watch.scopes(i)
+    (tmp_path / "maintenance-pod").unlink()
+    (tmp_path / "maintenance-all").write_text("")                       # empty = 2 h from mtime
+    assert watch.maintenance(i, os.path.getmtime(tmp_path / "maintenance-all") + 60)
+    assert watch.maintenance(i, os.path.getmtime(tmp_path / "maintenance-all") + watch.MAINT_DEFAULT_S + 1) is None
+
+
+def test_not_applicable_fix_is_logged_not_posted(monkeypatch):
+    monkeypatch.setattr(watch.actions, "run", lambda *a, **k: {"ok": False, "rc": 5,
+                        "out": "no engine process for s and nothing restarted it", "err": ""})
+    i = watch.Issue(f"engine:{SITE}", "engine", SITE, "engine down", [])
+    did = []
+    assert watch.fix_engine(i, did) is None and "not applicable" in did[-1]
+    posts, _ = run(monkeypatch, [[dict(key=i.key, kind="engine", target=SITE, title="t", evidence=[])]],
+                   {i.key: None})
+    assert posts == []
