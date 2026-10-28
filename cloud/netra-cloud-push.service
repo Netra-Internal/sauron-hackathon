@@ -1,0 +1,22 @@
+# /etc/systemd/system/netra-cloud-push.service on the Pi nodes (demo-node, demo-node2). Env: /etc/netra-cloud-push.env.
+# KillMode=control-group + a short stop timeout: a stop/restart takes every ffmpeg of the unit with it (KILL after 20 s,
+# e.g. one stuck in the encoder). /run/netra-cloud-push (progress files) survives restarts for netra-node-push-health.
+[Unit]
+Description=Netra camera push -> cloud edge pod (Wi-Fi only, via droplet relay)
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+User=netra
+EnvironmentFile=/etc/netra-cloud-push.env
+ExecStart=/usr/local/bin/netra-cloud-push
+RuntimeDirectory=netra-cloud-push
+RuntimeDirectoryPreserve=yes
+KillMode=control-group
+TimeoutStopSec=20
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
