@@ -30,7 +30,7 @@ def state(tmp_path, monkeypatch):
 
 def test_william_mention_in_channel_is_a_question():
     assert policy.classify(msg(), CFG) == "ask"
-    assert policy.classify(msg(mentions_bot=False, replies_to_bot=True), CFG) == "ask"
+    assert policy.classify(msg(mentions_bot=False, replies_to_bot=True), CFG) == "ignore"   # @mention only
 
 
 @pytest.mark.parametrize("kw", [dict(author_id=999), dict(channel_id=333), dict(author_is_bot=True),
@@ -47,9 +47,10 @@ def test_other_user_cannot_confirm_or_get_thanks():
 
 
 def test_yes_only_counts_with_a_pending_proposal():
-    assert policy.classify(msg(content="yes", mentions_bot=False), CFG, has_pending=True) == "confirm"
-    assert policy.classify(msg(content="yes", mentions_bot=False), CFG, has_pending=False) == "ignore"
-    assert policy.classify(msg(content="no", mentions_bot=False), CFG, has_pending=True) == "cancel"
+    assert policy.classify(msg(content="yes"), CFG, has_pending=True) == "confirm"
+    assert policy.classify(msg(content="yes", mentions_bot=False), CFG, has_pending=True) == "ignore"  # @mention only
+    assert policy.classify(msg(content="yes"), CFG, has_pending=False) == "ask"
+    assert policy.classify(msg(content="no"), CFG, has_pending=True) == "cancel"
     assert policy.classify(msg(content="yes, but first tell me why", mentions_bot=True), CFG, has_pending=True) == "ask"
 
 
@@ -61,7 +62,8 @@ def test_yes_only_counts_with_a_pending_proposal():
                                     ("send me ten thank-yous please", 10)])
 def test_parse_thanks(text, n):
     assert policy.parse_thanks(text) == n
-    assert policy.classify(msg(content=text, mentions_bot=False), CFG) == "thanks"
+    assert policy.classify(msg(content=text), CFG) == "thanks"
+    assert policy.classify(msg(content=text, mentions_bot=False), CFG) == "ignore"
 
 
 def test_thanks_reply_exact_and_capped():
@@ -341,7 +343,7 @@ def test_degrades_again_within_2h_needs_root_cause(monkeypatch):
         monkeypatch.setattr(watch, "detect", lambda s, now, iss=issues: ([watch.Issue(**i) for i in iss], {}))
         watch.run_pass(state, NOW + n * 60, handle=handle, poster=lambda t, m: posts.append((t, m)))
     assert calls == [CAM["key"]]                                     # fixed once, then never touched again
-    assert len(posts) == 1 and "NEEDS ROOT CAUSE" in posts[0][0] and posts[0][1]
+    assert posts == []                                              # root cause: log only, never posted
     assert "demo-linovision-2" in state["rootcause"]
     # nodeguard marks demo-node2 fixed -> cleared, and a later outage is handled normally again
     assert watch.clear_rootcause(state, [{"node": "demo-node2", "kind": "note", "state": "fixed"}]) == ["demo-linovision-2"]
@@ -579,3 +581,12 @@ def test_not_applicable_fix_is_logged_not_posted(monkeypatch):
     posts, _ = run(monkeypatch, [[dict(key=i.key, kind="engine", target=SITE, title="t", evidence=[])]],
                    {i.key: None})
     assert posts == []
+
+
+def test_only_two_post_types_exist():
+    """William, Oct 28 (final): the watcher posts only 'infra down, could not fix' (with an @mention); nothing else."""
+    import inspect
+    src = inspect.getsource(watch)
+    assert src.count("poster(") == 1                                    # one post call in the whole watcher ...
+    assert "should_post = fixed is False and prev is not False and i.kind in POST_KINDS" in src   # ... behind this gate
+    assert watch.EVENT_KINDS.isdisjoint(watch.POST_KINDS) and "uv" not in watch.POST_KINDS

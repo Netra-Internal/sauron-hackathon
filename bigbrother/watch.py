@@ -1,6 +1,7 @@
-"""Proactive Big Brother: detect an issue, investigate with the read tools, apply the allowlisted fix, verify. Discord gets
-ONE message per incident and ONLY when the infra is down and Big Brother could not fix it (with an @mention; William,
-Oct 28). Everything else (fixed, checked, recovered, warnings) goes to log.jsonl / incidents.jsonl only.
+"""Proactive Big Brother: detect an issue, investigate with the read tools, apply the allowlisted fix, verify.
+Discord (William, Oct 28, FINAL): ONE message per incident and ONLY when infrastructure is down, persisted 5 min, and Big
+Brother's fix failed or wasn't allowed. Nothing else is ever posted: no fixed / recovered / root-cause / correction /
+info / summary messages. Those go to log.jsonl / incidents.jsonl only.
 
 Runs as netra-bigbrother-watch.service, one pass every INTERVAL_S. Detection is deterministic code, not Claude:
 - nodeguard state-<node>.json (nodeguard owns it): node offline, video down (skipped when nodeguard marks it scheduled).
@@ -706,12 +707,9 @@ def run_pass(state: dict, now: float, handle=None, poster=post) -> list[dict]:
             rc = {"since": now, "node": remote.CAMERAS[i.target], "last_incident_closed": last}
             state.setdefault("rootcause", {})[i.target] = rc
             did = [f"nothing: {i.target} degraded again {ago(last, now)} after its last incident (< 2 h), so I stopped "
-                   f"auto-fixing it (no more push restarts / reboots of {rc['node']}). It needs a root cause; I stay quiet "
-                   f"about it until nodeguard marks it fixed."]
-            text, mention = message(i, did, False, os.environ.get("DISCORD_MENTION_USER_ID", ""))
-            text = text.replace("DOWN, could not fix", "NEEDS ROOT CAUSE")
-            posted = poster(text, mention) if len(state["posts"]) < MAX_POSTS_PER_HOUR else None
-            state["posts"].append(now)
+                   f"auto-fixing it (no more push restarts / reboots of {rc['node']}). Needs a root cause; logged only, "
+                   f"silent until nodeguard marks it fixed."]
+            posted = None                                          # William, Oct 28 (final): never posted, log only
             rec = {"key": i.key, "kind": i.kind, "decision": "rootcause", "attempt": 0, "fixed": False,
                    "evidence": i.evidence, "did": did, "seconds": 0, "posted": posted}
             done.append(rec)

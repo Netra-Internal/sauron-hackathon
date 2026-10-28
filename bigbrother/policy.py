@@ -3,9 +3,8 @@
 Rules (brief, Oct 27):
 - Only William (DISCORD_MENTION_USER_ID) in the private alert channel (DISCORD_CHANNEL_ID). Everyone and everything else
   (other users, other channels, DMs, bots and webhooks, including our own messages) is ignored.
-- A question needs an @mention of the bot or a reply to one of the bot's messages.
-- A plain "yes" / "no" answers a pending proposal (see actions.propose), with no mention needed.
-- "Do N thank yous" is answered in plain code (running joke), no Claude call.
+- Big Brother replies in Discord ONLY when William @mentions it (William, Oct 28, final): questions, "yes"/"no" to a
+  pending proposal and "Do N thank yous" (plain code, no Claude call) all need the @mention.
 """
 from __future__ import annotations
 
@@ -45,7 +44,7 @@ class Cfg:
 
 def classify(m: Msg, cfg: Cfg, has_pending: bool = False) -> str:
     """'ignore' | 'thanks' | 'confirm' | 'cancel' | 'ask'."""
-    if m.author_is_bot or m.author_id != cfg.user_id or m.channel_id != cfg.channel_id:
+    if m.author_is_bot or m.author_id != cfg.user_id or m.channel_id != cfg.channel_id or not m.mentions_bot:
         return "ignore"
     if parse_thanks(m.content) is not None:
         return "thanks"
@@ -53,7 +52,7 @@ def classify(m: Msg, cfg: Cfg, has_pending: bool = False) -> str:
         return "confirm"
     if has_pending and NO.match(m.content):
         return "cancel"
-    if (m.mentions_bot or m.replies_to_bot) and m.content.strip():
+    if m.content.strip():
         return "ask"
     return "ignore"
 
