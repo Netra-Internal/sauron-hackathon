@@ -33,6 +33,12 @@ FPS_WINDOW_S = 180
 LOW_FPS = 2.5                 # "far below 5"
 RETRY_S = 3600
 MAX_ATTEMPTS = 3
+# camera / node incidents: ONE push restart then ONE reboot per incident, no retries (manager, Oct 28: no restart loops)
+MAX_ATTEMPTS_KIND = {"cam": 1, "node": 1}
+REPEAT_S = 7200               # a camera that degrades again within 2 h of its last incident -> "needs root cause"
+PUSH_HEALTH_DEFER_S = 900     # the node's own push-health watchdog (nodeguard) acted this recently -> leave it alone
+HOLD_DIRS = [os.environ.get("BB_NODEGUARD_DIR", "/var/lib/netra-nodeguard"), STATE]
+MAX_VALID_FPS = 30            # feed_health can report bursts (295 fps after a restart): not a proof of health
 CLOSE_AFTER_CLEAR = 2         # passes without the issue before an incident closes
 MAX_POSTS_PER_HOUR = 6
 # incident kinds that mean "infra down"; uv (power warning) and engineslow are logged, never posted
@@ -252,7 +258,9 @@ def engine_issues(site: str, rows: list | None, fh: dict, pod: dict, state: dict
     for cam, c in (h.get("cameras") or {}).items():
         f = fh.get(cam)
         rx = c.get("last_rx_age_s")
-        if f and f["age_s"] < ENGINE_LINK_S and (rx is None or rx > ENGINE_LINK_S):
+        if rx is not None and rx <= ENGINE_LINK_S:
+            seen[f"enginelink:{cam}"] = True                  # alert on a broken link only once it has worked
+        if f and f["age_s"] < ENGINE_LINK_S and (rx is None or rx > ENGINE_LINK_S) and seen.get(f"enginelink:{cam}"):
             out.append(Issue(f"enginelink:{cam}", "enginelink", cam, f"{cam} -> engine link broken",
                              [f"feed_health: {cam} heartbeat {f['age_s']} s old (edge is up)",
                               f"engine_health {pt(t0)}: last bucket from {cam} "
@@ -272,10 +280,15 @@ def detect(state: dict, now: float) -> tuple[list[Issue], dict]:
     states = {n: nodeguard_state(n) for n in remote.NODES}
     fh = feed(now)
     pod, probe = pod_issues(now)
+    events = new_events(state)
+    state["recent_events"] = [e for e in state.get("recent_events", []) + events
+                              if now - datetime.fromisoformat(e.get("t", "1970-01-01T00:00:00+00:00")).timestamp() < 3600]
+    for cam in clear_rootcause(state, events):
+        log.write({"kind": "auto_rootcause_cleared", "camera": cam})
     eng = []
     for site in remote.ENGINE_SITES:
         eng += engine_issues(site, engine_rows(site), fh, probe, state, now)
-    issues = node_issues(states, now) + camera_issues(fh, states, now) + event_issues(new_events(state)) + pod + eng
+    issues = node_issues(states, now) + camera_issues(fh, states, now) + event_issues(events) + pod + eng
     return issues, {"feed": fh, "pod": probe, "nodes": {n: {k: s.get(k) for k in ("node", "video", "video_since")}
                                                         for n, s in states.items()}}
 
@@ -299,7 +312,7 @@ def wait_feed(cam: str, timeout_s: int, sleep=time.sleep) -> dict | None:
     while time.time() - t0 < timeout_s:
         sleep(15)
         f = feed(time.time()).get(cam)
-        if f and f["age_s"] < 30 and (f["fps"] or 0) >= 3:
+        if f and f["age_s"] < 30 and 3 <= (f["fps"] or 0) <= MAX_VALID_FPS:
             return f
     return None
 
@@ -489,6 +502,71 @@ def post(text: str, mention: bool) -> dict:
         return {"status": getattr(e, "code", None), "error": str(e)[:300]}
 
 
+# ------------------------------------------------------------------------------------------- holds and root cause
+
+def hold(node: str, now: float) -> dict | None:
+    """nodeguard (or a human) can stop Big Brother touching a node: a file hold-<node> in /var/lib/netra-nodeguard (or
+    Big Brother's state dir). Empty = until removed; JSON {"until": iso|epoch, "by", "reason"} = until then."""
+    for d in HOLD_DIRS:
+        p = os.path.join(d, f"hold-{node}")
+        if not os.path.exists(p):
+            continue
+        try:
+            h = json.loads(open(p).read() or "{}")
+        except ValueError:
+            h = {"reason": "unreadable hold file (treated as a hold)"}
+        u = h.get("until")
+        until = (u if isinstance(u, (int, float)) else datetime.fromisoformat(u).timestamp()) if u else None
+        if until is None or now < until:
+            return {"file": p, **h}
+    return None
+
+
+def recent_push_health(node: str, events: list[dict], now: float) -> dict | None:
+    """The node's own push-health watchdog (nodeguard, kind "push") acted in the last PUSH_HEALTH_DEFER_S."""
+    for e in reversed(events):
+        if e.get("node") == node and e.get("kind") == "push":
+            t = datetime.fromisoformat(e.get("at") or e["t"]).timestamp()
+            if now - t < PUSH_HEALTH_DEFER_S:
+                return e
+    return None
+
+
+def node_of(i: Issue) -> str:
+    return remote.CAMERAS.get(i.target, "") if i.kind in ("cam", "watcher", "enginelink") else \
+        (i.target if i.kind in ("node", "tailscale", "uv") else "")
+
+
+def blocked(i: Issue, state: dict, now: float) -> str | None:
+    """Why Big Brother must not act on (or post about) this issue now; None = go."""
+    rc = state.get("rootcause", {}).get(i.target) if i.kind == "cam" else None
+    if rc:
+        return f"needs root cause since {pt(rc['since'])}: auto-fix stopped until nodeguard marks it fixed"
+    node = node_of(i)
+    if node:
+        h = hold(node, now)
+        if h:
+            return f"{node} on hold ({h['file']}: {h.get('reason', '')}, by {h.get('by', '?')})"
+        if i.kind == "cam":
+            e = recent_push_health(node, state.get("recent_events", []), now)
+            if e:
+                return f"{node}'s own push-health watchdog acted at {pt(e.get('at') or e['t'])} ({e.get('state')}): left to it"
+    return None
+
+
+def clear_rootcause(state: dict, events: list[dict]) -> list[str]:
+    """nodeguard marks a node fixed with an event {"node", "kind": "note", "state": "fixed"[, "camera"]}."""
+    cleared = []
+    for e in events:
+        if e.get("kind") == "note" and e.get("state") == "fixed":
+            for cam, node in remote.CAMERAS.items():
+                if node == e.get("node") and e.get("camera") in (None, cam) and cam in state.get("rootcause", {}):
+                    del state["rootcause"][cam]
+                    state.setdefault("cam_closed", {}).pop(cam, None)   # a fresh start after the fix
+                    cleared.append(cam)
+    return cleared
+
+
 # ------------------------------------------------------------------------------------------------------------- driver
 
 def _load() -> dict:
@@ -513,7 +591,7 @@ def decide(inc: dict | None, now: float, kind: str) -> str:
         return "skip" if now - inc["opened"] < EVENT_MERGE_S[kind] else "new"
     if inc["fixed"] is not False and now - inc["last_attempt"] < 600:
         return "skip"                                              # just fixed / checked: give it time to clear
-    if inc["attempts"] >= MAX_ATTEMPTS:
+    if inc["attempts"] >= MAX_ATTEMPTS_KIND.get(kind, MAX_ATTEMPTS):
         return "skip"
     return "retry" if now - inc["last_attempt"] >= (RETRY_S if inc["fixed"] is False else 600) else "skip"
 
@@ -527,6 +605,31 @@ def run_pass(state: dict, now: float, handle=None, poster=post) -> list[dict]:
         inc = state["open"].get(i.key)
         d = decide(inc, now, i.kind)
         if d == "skip":
+            continue
+        why_not = blocked(i, state, now)
+        if why_not:
+            if state.setdefault("blocked_logged", {}).get(i.key) != why_not:
+                state["blocked_logged"][i.key] = why_not
+                log.write({"kind": "auto_blocked", "key": i.key, "why": why_not, "evidence": i.evidence})
+            continue
+        state.get("blocked_logged", {}).pop(i.key, None)
+        last = state.get("cam_closed", {}).get(i.target) if i.kind == "cam" else None
+        if d == "new" and last and now - last < REPEAT_S:
+            rc = {"since": now, "node": remote.CAMERAS[i.target], "last_incident_closed": last}
+            state.setdefault("rootcause", {})[i.target] = rc
+            did = [f"nothing: {i.target} degraded again {ago(last, now)} after its last incident (< 2 h), so I stopped "
+                   f"auto-fixing it (no more push restarts / reboots of {rc['node']}). It needs a root cause; I stay quiet "
+                   f"about it until nodeguard marks it fixed."]
+            text, mention = message(i, did, False, os.environ.get("DISCORD_MENTION_USER_ID", ""))
+            text = text.replace("DOWN, could not fix", "NEEDS ROOT CAUSE")
+            posted = poster(text, mention) if len(state["posts"]) < MAX_POSTS_PER_HOUR else None
+            state["posts"].append(now)
+            rec = {"key": i.key, "kind": i.kind, "decision": "rootcause", "attempt": 0, "fixed": False,
+                   "evidence": i.evidence, "did": did, "seconds": 0, "posted": posted}
+            done.append(rec)
+            log.write({"kind": "auto", **rec})
+            with open(os.path.join(STATE, "incidents.jsonl"), "a") as f:
+                f.write(json.dumps({"t": datetime.now(timezone.utc).isoformat(timespec="seconds"), **rec}) + "\n")
             continue
         did: list[str] = []
         t0 = time.time()
@@ -567,6 +670,8 @@ def run_pass(state: dict, now: float, handle=None, poster=post) -> list[dict]:
             continue
         inc["clear"] = inc.get("clear", 0) + 1
         if inc["clear"] >= CLOSE_AFTER_CLEAR:
+            if inc["kind"] == "cam":
+                state.setdefault("cam_closed", {})[key.split(":", 1)[1]] = now
             log.write({"kind": "auto_close", "key": key, "incident": inc})
             del state["open"][key]
     state["last_pass"] = {"t": now, "issues": sorted(seen), "snapshot": snapshot}
@@ -581,14 +686,49 @@ def main() -> None:
     log.write({"kind": "watch_start", "cameras": remote.CAMERAS, "nodes": remote.NODES})
     while True:
         t0 = time.time()
-        state = _load()
-        try:
-            run_pass(state, t0)
-        except Exception as e:
-            log.write({"kind": "watch_error", "error": f"{type(e).__name__}: {e}"})
-        _save(state)
+        with state_lock():
+            state = _load()
+            try:
+                run_pass(state, t0)
+            except Exception as e:
+                log.write({"kind": "watch_error", "error": f"{type(e).__name__}: {e}"})
+            _save(state)
         time.sleep(max(5, INTERVAL_S - (time.time() - t0)))
 
 
+class state_lock:
+    """watch.json is shared by the service and the CLI: one writer at a time."""
+    def __enter__(self):
+        import fcntl
+        os.makedirs(STATE, exist_ok=True)
+        self.f = open(os.path.join(STATE, "state.lock"), "w")
+        fcntl.flock(self.f, fcntl.LOCK_EX)
+
+    def __exit__(self, *a):
+        self.f.close()
+
+
+def cli(argv: list[str]) -> None:
+    """python -m bigbrother.watch rootcause <camera> [reason] | clear <camera> | status"""
+    with state_lock():
+        _cli(argv)
+
+
+def _cli(argv: list[str]) -> None:
+    s = _load()
+    if argv[:1] == ["rootcause"] and argv[1:2] and argv[1] in remote.CAMERAS:
+        s.setdefault("rootcause", {})[argv[1]] = {"since": time.time(), "node": remote.CAMERAS[argv[1]],
+                                                  "reason": " ".join(argv[2:]) or "set by hand"}
+        log.write({"kind": "auto_rootcause_set", "camera": argv[1], "by": "cli", "reason": " ".join(argv[2:])})
+    elif argv[:1] == ["clear"] and argv[1:2]:
+        s.get("rootcause", {}).pop(argv[1], None)
+        s.get("cam_closed", {}).pop(argv[1], None)
+        log.write({"kind": "auto_rootcause_cleared", "camera": argv[1], "by": "cli"})
+    print(json.dumps({"rootcause": s.get("rootcause", {}), "open": s.get("open", {}),
+                      "holds": {n: hold(n, time.time()) for n in remote.NODES}}, indent=1, default=str))
+    _save(s)
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+    cli(sys.argv[1:]) if len(sys.argv) > 1 else main()

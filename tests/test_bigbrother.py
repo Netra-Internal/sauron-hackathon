@@ -234,6 +234,8 @@ def test_claude_cannot_auto_run():
 
 # --- proactive watcher ---------------------------------------------------------------------------------------------
 
+from datetime import datetime  # noqa: E402
+
 from bigbrother import watch  # noqa: E402
 
 NOW = 1_800_000_000.0
@@ -317,15 +319,63 @@ def test_only_unfixed_infra_down_posts(monkeypatch, fixed):
     assert posts == []
 
 
-def test_unfixed_mentions_once_retries_hourly_and_recovers_silently(monkeypatch):
+def test_unfixed_camera_posts_once_and_is_never_retried(monkeypatch):
     results = {CAM["key"]: False}
-    posts, state = run(monkeypatch, [[CAM]] * 30, results)          # 30 min still broken
-    assert len(posts) == 1 and posts[0][1]                          # one mention, no repeats
-    assert state["open"][CAM["key"]]["attempts"] == 1
-    posts, state = run(monkeypatch, [[CAM]] * 62, results)          # an hour later: silent retry
-    assert len(posts) == 1 and state["open"][CAM["key"]]["attempts"] == 2
+    posts, state = run(monkeypatch, [[CAM]] * 150, results)         # 2.5 h still broken
+    assert len(posts) == 1 and posts[0][1]                          # one mention
+    assert state["open"][CAM["key"]]["attempts"] == 1               # one push restart + one reboot, no loop
     posts, state = run(monkeypatch, [[CAM]] * 3 + [[], []], results)  # recovers on its own -> no post
     assert len(posts) == 1 and state["open"] == {}
+
+
+def test_degrades_again_within_2h_needs_root_cause(monkeypatch):
+    calls = []
+    def handle(i, did):
+        calls.append(i.key)
+        return True
+    posts, state = [], {"open": {}, "posts": []}
+    seq = [[CAM], [], [], [CAM]] + [[CAM], [], []] * 20               # fixed, clears, back 3 min later, flaps for 1 h
+    for n, issues in enumerate(seq):
+        monkeypatch.setattr(watch, "detect", lambda s, now, iss=issues: ([watch.Issue(**i) for i in iss], {}))
+        watch.run_pass(state, NOW + n * 60, handle=handle, poster=lambda t, m: posts.append((t, m)))
+    assert calls == [CAM["key"]]                                     # fixed once, then never touched again
+    assert len(posts) == 1 and "NEEDS ROOT CAUSE" in posts[0][0] and posts[0][1]
+    assert "demo-linovision-2" in state["rootcause"]
+    # nodeguard marks demo-node2 fixed -> cleared, and a later outage is handled normally again
+    assert watch.clear_rootcause(state, [{"node": "demo-node2", "kind": "note", "state": "fixed"}]) == ["demo-linovision-2"]
+    assert "demo-linovision-2" not in state["rootcause"]
+
+
+def test_hold_file_stops_actions_and_posts(monkeypatch, tmp_path):
+    monkeypatch.setattr(watch, "HOLD_DIRS", [str(tmp_path)])
+    (tmp_path / "hold-demo-node2").write_text(json.dumps({"by": "nodeguard", "reason": "root-causing"}))
+    calls = []
+    posts, state = [], {"open": {}, "posts": []}
+    monkeypatch.setattr(watch, "detect", lambda s, now: ([watch.Issue(**CAM)], {}))
+    for n in range(5):
+        watch.run_pass(state, NOW + n * 60, handle=lambda i, d: calls.append(1) or False,
+                       poster=lambda t, m: posts.append(t))
+    assert calls == [] and posts == []
+    (tmp_path / "hold-demo-node2").write_text(json.dumps({"until": NOW + 120}))   # expiring hold
+    assert watch.hold("demo-node2", NOW + 60) and watch.hold("demo-node2", NOW + 121) is None
+    (tmp_path / "hold-demo-node2").write_text("")                                  # empty file = until removed
+    assert watch.hold("demo-node2", NOW + 10**6)
+
+
+def test_defers_to_the_nodes_own_push_health():
+    st = {"recent_events": [{"t": "2026-10-28T19:50:15+00:00", "at": "2026-10-28T19:49:51+00:00", "node": "demo-node2",
+                             "kind": "push", "state": "fallback"}]}
+    t = datetime.fromisoformat("2026-10-28T19:55:00+00:00").timestamp()
+    i = watch.Issue(**CAM)
+    assert "push-health" in watch.blocked(i, st, t)
+    assert watch.blocked(i, st, t + watch.PUSH_HEALTH_DEFER_S) is None
+
+
+def test_burst_fps_is_not_proof_of_health(monkeypatch):
+    seq = iter([{"demo-linovision-2": {"age_s": 5, "fps": 295.5, "beats": 3}},
+                {"demo-linovision-2": {"age_s": 5, "fps": 5.1, "beats": 9}}])
+    monkeypatch.setattr(watch, "feed", lambda now: next(seq))
+    assert watch.wait_feed("demo-linovision-2", 100, sleep=lambda s: None)["fps"] == 5.1
 
 
 def test_tailscale_events_merge_within_an_hour(monkeypatch):
@@ -398,7 +448,11 @@ def test_engine_down_stuck_link_slow():
     assert [i.title for i in stuck] == [f"site engine {SITE} stuck"]
     moving = watch.engine_issues(SITE, [hrow(NOW - 5, 160), hrow(NOW - 70, 100)], fh, pod, {}, NOW)
     assert moving == []
-    link = watch.engine_issues(SITE, [hrow(NOW - 5, 160, {"demo-linovision": {"last_rx_age_s": 300}})], fh, pod, {}, NOW)
+    st = {}
+    link = watch.engine_issues(SITE, [hrow(NOW - 5, 160, {"demo-linovision": {"last_rx_age_s": 300}})], fh, pod, st, NOW)
+    assert link == []                                                   # never seen working (rollout): silent
+    watch.engine_issues(SITE, [hrow(NOW - 5, 160)], fh, pod, st, NOW)   # link works once
+    link = watch.engine_issues(SITE, [hrow(NOW - 5, 160, {"demo-linovision": {"last_rx_age_s": 300}})], fh, pod, st, NOW)
     assert [i.key for i in link] == ["enginelink:demo-linovision"]
     # camera itself down -> that's the camera incident, not a link incident
     assert watch.engine_issues(SITE, [hrow(NOW - 5, 160, {"demo-linovision": {"last_rx_age_s": 300}})],
