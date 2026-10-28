@@ -11,15 +11,19 @@ import os
 import sys
 import time
 
-from . import actions, log, reads
+from . import actions, log, reads, remote
 
 TOOLS = {
-    "node_status": (reads.node_status, "demo-node (the Pi at the camera): temperature, throttled bits decoded, uptime, "
-                    "push/tailscale state, last nodeguard report, recent netra-cloud-push journal.", {}),
+    "node_status": (reads.node_status, "a camera node (Pi): temperature, throttled bits decoded, uptime, "
+                    "push/tailscale state, last nodeguard report + state, recent netra-cloud-push journal.",
+                    {"node": {"type": "string", "default": "demo-node"}}),
     "node_events": (reads.node_events, "nodeguard events (tailscale/wifi watchdog restarts, throttle, power, tunnel, "
                     "reboots) and the uptime timeline.", {"hours": {"type": "number", "default": 24}}),
-    "pi_journal": (reads.pi_journal, "journal of one Pi unit: " + ", ".join(reads.PI_UNITS),
-                   {"unit": {"type": "string"}, "lines": {"type": "integer", "default": 40}}),
+    "pi_journal": (reads.pi_journal, "journal of one node unit: " + ", ".join(reads.PI_UNITS),
+                   {"unit": {"type": "string"}, "lines": {"type": "integer", "default": 40},
+                    "node": {"type": "string", "default": "demo-node"}}),
+    "incidents": (reads.bb_incidents, "Big Brother's own proactive incidents (what the watcher detected, did, and the result).",
+                  {"n": {"type": "integer", "default": 10}}),
     "camera_health": (reads.camera_health, "production DB view of a camera: feed_health heartbeats (fps, frame age, "
                       "infer ms), Jev watch records, incidents.", {"camera": {"type": "string", "default": "demo-linovision"}}),
     "pod_status": (reads.pod_status, "cloud GPU pod: edge/dispatch/archive processes, GPU, disk, recent log lines.", {}),
@@ -38,7 +42,9 @@ TOOLS = {
 
 
 def _actions_doc() -> str:
-    return "; ".join(f"{n} [{a.kind}]: {a.what}" for n, a in actions.ACTIONS.items())
+    return ("; ".join(f"{n} [{a.kind}{', target=' + a.target if a.target else ''}]: {a.what}"
+                      for n, a in actions.ACTIONS.items()) +
+            f". Nodes: {sorted(remote.NODES)}. Cameras (-> node): {remote.CAMERAS}.")
 
 
 def tool_list() -> list:
@@ -46,10 +52,12 @@ def tool_list() -> list:
            for n, (_, d, p) in TOOLS.items()]
     out.append({"name": "run_fix", "description": "Run a SAFE runbook action. Only works when William's message asked "
                 "for a fix/restart. Actions: " + _actions_doc(),
-                "inputSchema": {"type": "object", "properties": {"action": {"type": "string"}}, "required": ["action"]}})
+                "inputSchema": {"type": "object", "properties": {"action": {"type": "string"}, "target": {"type": "string"}},
+                                "required": ["action"]}})
     out.append({"name": "propose_action", "description": "Propose a runbook action for William to approve with 'yes' "
                 "(required for [confirm] actions, and for [safe] ones he did not ask for).",
-                "inputSchema": {"type": "object", "properties": {"action": {"type": "string"}, "reason": {"type": "string"}},
+                "inputSchema": {"type": "object", "properties": {"action": {"type": "string"}, "reason": {"type": "string"},
+                                                                 "target": {"type": "string"}},
                                 "required": ["action", "reason"]}})
     return out
 
@@ -58,9 +66,9 @@ def call(name: str, args: dict) -> list:
     req = os.environ.get("BB_REQUEST", "")
     t0 = time.time()
     if name == "run_fix":
-        res = actions.run(str(args.get("action", "")), request_text=req)
+        res = actions.run(str(args.get("action", "")), request_text=req, target=str(args.get("target", "")))
     elif name == "propose_action":
-        res = actions.propose(str(args.get("action", "")), str(args.get("reason", "")))
+        res = actions.propose(str(args.get("action", "")), str(args.get("reason", "")), str(args.get("target", "")))
     elif name in TOOLS:
         fn = TOOLS[name][0]
         allowed = TOOLS[name][2]

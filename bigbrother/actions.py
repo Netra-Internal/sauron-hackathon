@@ -1,12 +1,13 @@
-"""The runbook: the only things Big Brother can change. Each action is a named, fixed script; nothing is composed from
-model output.
+"""The runbook: the only things Big Brother can change. Each action is a named, fixed script with a target picked from a
+fixed list (a node, a camera, or none); nothing is composed from model output.
 
-SAFE   (restarts from the brief): run when William's own message asks for a fix/restart (policy.fix_intent), or after "yes".
-CONFIRM (anything with a bigger blast radius): never run from a question. Claude can only propose them; the bot runs one
-        when William answers the proposal with "yes" in the channel, within PENDING_TTL_S.
-Anything not listed here (config edits, deploys, deleting, spending money, moving the camera) cannot be run at all:
-Claude replies with the exact action for a human to take.
-Every action runs at most once per COOLDOWN_S."""
+SAFE    restarts: run when William's own message asks for a fix/restart (policy.fix_intent), after his "yes", or from the
+        proactive watcher (auto=True, code not Claude).
+CONFIRM bigger blast radius: never from a question; Claude can only propose them, the bot runs one on William's "yes".
+REBOOT  reboot_node: a CONFIRM action that the watcher may also run (auto=True) but ONLY after a failed push restart on
+        that node in the last REBOOT_AFTER_S, at most once per REBOOT_EVERY_S per node, and only if / is the overlay root.
+Anything not listed (config edits, deploys, deleting, spending money, moving the camera) cannot be run at all.
+Every action+target runs at most once per COOLDOWN_S."""
 from __future__ import annotations
 
 import json
@@ -21,18 +22,18 @@ from . import policy, remote
 STATE = os.environ.get("BB_STATE", "/var/lib/netra-bigbrother")
 COOLDOWN_S = 300
 PENDING_TTL_S = 600
+REBOOT_EVERY_S = 1800
+REBOOT_AFTER_S = 1200
 
-CAM = "demo-linovision"
-
-POD_JEV = f"""
+POD_JEV = """
 cd /workspace/edge
-loop=$(pgrep -f '^bash cloud/pod/dispatch.sh {CAM}$')
-echo "loop pid: ${{loop:-none}}"
-pkill -f -- '-m ask.dispatch.watch --camera {CAM} ' && echo "killed watcher; the loop restarts it in 15 s"
-if [ -z "$loop" ]; then setsid nohup bash cloud/pod/dispatch.sh {CAM} >/dev/null 2>&1 </dev/null & echo "started a new dispatch.sh loop"; fi
+loop=$(pgrep -f '^bash cloud/pod/dispatch.sh {cam}$')
+echo "loop pid: ${loop:-none}"
+pkill -f -- '-m ask.dispatch.watch --camera {cam} ' && echo "killed watcher; the loop restarts it in 15 s"
+if [ -z "$loop" ]; then setsid nohup bash cloud/pod/dispatch.sh {cam} >/dev/null 2>&1 </dev/null & echo "started a new dispatch.sh loop"; fi
 sleep 25
-pgrep -af 'dispatch.*{CAM}'
-tail -n 4 logs/dispatch-{CAM}.log
+pgrep -af 'dispatch.*{cam}( |$)'
+tail -n 4 logs/dispatch-{cam}.log
 """
 
 POD_ARCHIVE = """
@@ -56,6 +57,13 @@ pgrep -af 'cloud/pod/archive.py$'
 tail -n 4 logs/archive.log
 """
 
+REBOOT = """
+fs=$(findmnt -n -o FSTYPE /)
+[ "$fs" = overlay ] || { echo "root filesystem is '$fs', not the overlay root: refusing to reboot"; exit 4; }
+echo "overlay root confirmed; rebooting {node}"
+sudo systemd-run --on-active=2 --unit=bigbrother-reboot systemctl reboot && echo "reboot scheduled in 2 s"
+"""
+
 
 def _droplet_restart(unit: str, check: str = "") -> str:
     return f"""systemctl restart {unit}; sleep 4
@@ -67,32 +75,32 @@ journalctl -u {unit} -n 6 --no-pager -o short-iso"""
 @dataclass
 class Action:
     kind: str                    # "safe" | "confirm"
-    where: str                   # "pi" | "pod" | "droplet"
+    where: str                   # "node" | "pod" | "droplet"
+    target: str                  # "node" | "camera" | "" (fills {node} / {cam} in the script)
     what: str
     script: str
-    prefer: str = "tailnet"      # Pi route
+    prefer: str = "tailnet"      # node route
 
 
 ACTIONS: dict[str, Action] = {
-    "restart_pi_push": Action("safe", "pi", "restart netra-cloud-push on demo-node (camera -> pod video push)",
-        "sudo systemctl restart netra-cloud-push; sleep 6; systemctl is-active netra-cloud-push; "
+    "restart_push": Action("safe", "node", "node", "restart netra-cloud-push on {node} (camera -> pod video push)",
+        "sudo systemctl restart netra-cloud-push; sleep 8; systemctl is-active netra-cloud-push; "
         "journalctl -u netra-cloud-push -n 6 --no-pager -o short-iso"),
-    "restart_pi_tailscaled": Action("safe", "pi", "restart tailscaled on demo-node (over the reverse-SSH fallback)",
+    "restart_tailscaled": Action("safe", "node", "node", "restart tailscaled on {node} (over the reverse-SSH fallback)",
         "sudo systemctl restart --no-block tailscaled; sleep 10; systemctl is-active tailscaled; "
         "tailscale status --json 2>/dev/null | python3 -c 'import json,sys; print(\"BackendState\", json.load(sys.stdin)[\"BackendState\"])'",
         prefer="rev"),
-    "restart_pod_jev_watcher": Action("safe", "pod", f"restart the {CAM} Jev dispatch watcher on the pod "
+    "restart_pod_jev_watcher": Action("safe", "pod", "camera", "restart the {cam} Jev dispatch watcher on the pod "
         "(kill the watcher, its dispatch.sh loop restarts it; start the loop if it is gone)", POD_JEV),
-    "rerun_r2_archiver": Action("safe", "pod", "re-run the pod -> R2 footage archiver now (fresh pass; resumes from its done-list)",
-        POD_ARCHIVE),
-    "restart_netra_ask": Action("safe", "droplet", "restart netra-ask on the droplet",
+    "rerun_r2_archiver": Action("safe", "pod", "", "re-run the pod -> R2 footage archiver now (fresh pass; resumes from "
+        "its done-list)", POD_ARCHIVE),
+    "restart_netra_ask": Action("safe", "droplet", "", "restart netra-ask on the droplet",
         _droplet_restart("netra-ask", "sleep 3; curl -s -o /dev/null -w 'GET /ask/ -> %{http_code}\\n' http://127.0.0.1:8400/ask/")),
-    "restart_phonealert": Action("safe", "droplet", "restart netra-phonealert on the droplet",
+    "restart_phonealert": Action("safe", "droplet", "", "restart netra-phonealert on the droplet",
         _droplet_restart("netra-phonealert")),
-    # --- need William's "yes" ---
-    "reboot_pi": Action("confirm", "pi", "reboot demo-node (camera feed drops for ~1-2 min)",
-        "sudo systemctl reboot; echo reboot requested"),
-    "restart_pod_tunnels": Action("confirm", "droplet",
+    # --- need William's "yes" (reboot_node: or the watcher, after a failed push restart) ---
+    "reboot_node": Action("confirm", "node", "node", "reboot {node} (overlay root; its camera feed drops ~1-2 min)", REBOOT),
+    "restart_pod_tunnels": Action("confirm", "droplet", "",
         "restart the droplet -> pod SSH tunnels (netra-ask-cloud-tunnel, netra-cloud-hls-tunnel, netra-cloud-presign-tunnel)",
         "systemctl restart netra-ask-cloud-tunnel netra-cloud-hls-tunnel netra-cloud-presign-tunnel; sleep 5; "
         "systemctl is-active netra-ask-cloud-tunnel netra-cloud-hls-tunnel netra-cloud-presign-tunnel; "
@@ -100,12 +108,28 @@ ACTIONS: dict[str, Action] = {
 }
 
 
-def _execute(a: Action) -> dict:
-    if a.where == "pi":
-        return remote.pi(a.script, timeout=60, prefer=a.prefer)
+def resolve_target(a: Action, target: str) -> tuple[str, str] | None:
+    """-> (node, cam) for the action, or None if the target isn't one we know. Default: demo-node / demo-linovision."""
+    if a.target == "node":
+        target = target or "demo-node"
+        return (target, "") if target in remote.NODES else None
+    if a.target == "camera":
+        target = target or "demo-linovision"
+        return (remote.CAMERAS.get(target, ""), target) if target in remote.CAMERAS else None
+    return ("", "")
+
+
+def render(a: Action, node: str, cam: str) -> str:
+    return a.script.replace("{node}", node).replace("{cam}", cam)
+
+
+def _execute(a: Action, node: str, cam: str) -> dict:
+    script = render(a, node, cam)
+    if a.where == "node":
+        return remote.pi(script, timeout=90, prefer=a.prefer, node=node)
     if a.where == "pod":
-        return remote.pod(a.script, timeout=90)
-    return remote.droplet(a.script, timeout=60)
+        return remote.pod(script, timeout=120)
+    return remote.droplet(script, timeout=60)
 
 
 def _load(name: str, default):
@@ -124,37 +148,66 @@ def _save(name: str, obj) -> None:
     os.replace(tmp, os.path.join(STATE, name))
 
 
-def run(name: str, *, request_text: str, confirmed: bool = False,
-        execute: Callable[[Action], dict] = _execute, now: float | None = None) -> dict:
-    """The single gate every change goes through. Returns {"ok", "action", ...}; refusals say why."""
+def note_push_failed(node: str, now: float | None = None) -> None:
+    """The watcher calls this when a push restart did not bring the feed back; it unlocks reboot_node for that node."""
+    s = _load("pushfail.json", {})
+    s[node] = time.time() if now is None else now
+    _save("pushfail.json", s)
+
+
+def run(name: str, *, request_text: str, target: str = "", confirmed: bool = False, auto: bool = False,
+        execute: Callable[..., dict] = _execute, now: float | None = None) -> dict:
+    """The single gate every change goes through. Returns {"ok", "action", ...}; refusals say why and run nothing."""
     now = time.time() if now is None else now
     a = ACTIONS.get(name)
     if a is None:
         return {"ok": False, "action": name, "refused": "not in the runbook allowlist; nothing was run",
                 "allowed": sorted(ACTIONS)}
-    if a.kind == "confirm" and not confirmed:
+    t = resolve_target(a, target)
+    if t is None:
+        return {"ok": False, "action": name, "refused": f"unknown target {target!r}; nodes {sorted(remote.NODES)}, "
+                f"cameras {sorted(remote.CAMERAS)}; nothing was run"}
+    node, cam = t
+    key = f"{name}:{cam or node}" if a.target else name
+    what = a.what.replace("{node}", node).replace("{cam}", cam)
+    cooldown = _load("cooldown.json", {})
+    if name == "reboot_node":
+        if not confirmed:
+            failed = _load("pushfail.json", {}).get(node, 0)
+            if not (auto and now - failed < REBOOT_AFTER_S):
+                return {"ok": False, "action": name, "refused": "a reboot needs William's 'yes' (propose_action), or "
+                        "the watcher after a failed push restart on this node; nothing was run"}
+        if now - cooldown.get(key, 0) < REBOOT_EVERY_S:
+            return {"ok": False, "action": name, "refused": f"{node} was rebooted by Big Brother "
+                    f"{int(now - cooldown[key])} s ago; at most once per {REBOOT_EVERY_S} s; nothing was run"}
+    elif a.kind == "confirm" and not confirmed:
         return {"ok": False, "action": name, "refused": "needs William's 'yes': call propose_action instead; nothing was run"}
-    if a.kind == "safe" and not confirmed and not policy.fix_intent(request_text):
+    elif a.kind == "safe" and not (confirmed or auto or policy.fix_intent(request_text)):
         return {"ok": False, "action": name,
                 "refused": "William's message did not ask for a fix/restart; propose it instead; nothing was run"}
-    last = _load("cooldown.json", {})
-    if now - last.get(name, 0) < COOLDOWN_S:
+    elif now - cooldown.get(key, 0) < COOLDOWN_S:
         return {"ok": False, "action": name,
-                "refused": f"ran {int(now - last[name])} s ago; at most once per {COOLDOWN_S} s; nothing was run"}
-    last[name] = now
-    _save("cooldown.json", last)
+                "refused": f"ran {int(now - cooldown[key])} s ago; at most once per {COOLDOWN_S} s; nothing was run"}
+    cooldown[key] = now
+    _save("cooldown.json", cooldown)
     t0 = time.time()
-    res = execute(a)
-    return {"ok": res.get("rc") == 0, "action": name, "what": a.what, "seconds": round(time.time() - t0, 1), **res}
+    res = execute(a, node, cam)
+    return {"ok": res.get("rc") == 0, "action": name, "target": cam or node, "what": what,
+            "seconds": round(time.time() - t0, 1), **res}
 
 
-def propose(name: str, reason: str, *, now: float | None = None) -> dict:
+def propose(name: str, reason: str, target: str = "", *, now: float | None = None) -> dict:
     now = time.time() if now is None else now
     a = ACTIONS.get(name)
     if a is None:
         return {"ok": False, "refused": "not in the runbook: the bot cannot run it even with a yes. Tell William the "
                 "exact command for a human to run.", "allowed": sorted(ACTIONS)}
-    p = {"id": uuid.uuid4().hex[:8], "action": name, "what": a.what, "reason": reason, "at": now}
+    t = resolve_target(a, target)
+    if t is None:
+        return {"ok": False, "refused": f"unknown target {target!r}"}
+    node, cam = t
+    p = {"id": uuid.uuid4().hex[:8], "action": name, "target": cam or node,
+         "what": a.what.replace("{node}", node).replace("{cam}", cam), "reason": reason, "at": now}
     _save("pending.json", p)
     return {"ok": True, "pending": p, "note": "The bot will ask William to reply 'yes' within 10 min."}
 

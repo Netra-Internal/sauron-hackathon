@@ -55,25 +55,33 @@ def _tail_jsonl(path: str, n: int) -> list:
     return out
 
 
-def node_status() -> dict:
-    """Pi health: the last nodeguard report (pushed every minute) + a live query over ssh."""
+def node_status(node: str = "demo-node") -> dict:
+    """Pi health: the last nodeguard report (pushed every minute) and state + a live query over ssh."""
+    if node not in remote.NODES:
+        return {"error": f"unknown node; choose from {sorted(remote.NODES)}"}
     rep = {}
     try:
-        rep = json.load(open(f"{NODEGUARD}/report-demo-node.json"))
+        rep = json.load(open(f"{NODEGUARD}/report-{node}.json"))
         rep["throttled_decoded"] = decode_throttled(rep.get("throttled", "0x0"))
         rep["age_s"] = round(time.time() - datetime.fromisoformat(rep["received_at"]).timestamp())
     except (OSError, ValueError, KeyError) as e:
         rep = {"error": f"no nodeguard report: {e}"}
+    try:
+        st = json.load(open(f"{NODEGUARD}/state-{node}.json"))
+        st.pop("last_report", None)
+    except (OSError, ValueError) as e:
+        st = {"error": str(e)}
     live = remote.pi(
         "echo temp: $(vcgencmd measure_temp); echo $(vcgencmd get_throttled); echo up: $(uptime -p); cat /proc/loadavg; "
         "for u in " + " ".join(PI_UNITS[:3]) + "; do echo \"$u: $(systemctl is-active $u)\"; done; "
         "tailscale status --json 2>/dev/null | python3 -c 'import json,sys; print(\"tailscale BackendState:\", json.load(sys.stdin)[\"BackendState\"])'; "
         "free -m | sed -n 2p; df -h / | tail -1; "
-        "echo '--- netra-cloud-push journal'; journalctl -u netra-cloud-push -n 8 --no-pager -o short-iso", timeout=30)
+        "echo '--- netra-cloud-push journal'; journalctl -u netra-cloud-push -n 8 --no-pager -o short-iso", timeout=30,
+        node=node)
     for ln in live.get("out", "").splitlines():
         if ln.startswith("throttled="):
             live["throttled_decoded"] = decode_throttled(ln.split("=", 1)[1])
-    return {"nodeguard_last_report": rep, "live": live}
+    return {"node": node, "nodeguard_last_report": rep, "nodeguard_state": st, "live": live}
 
 
 def node_events(hours: float = 24) -> dict:
@@ -86,11 +94,13 @@ def node_events(hours: float = 24) -> dict:
     return {"events": ev[-60:], "timeline": tl.stdout[-4000:], "timeline_err": tl.stderr[-500:]}
 
 
-def pi_journal(unit: str, lines: int = 40) -> dict:
+def pi_journal(unit: str, lines: int = 40, node: str = "demo-node") -> dict:
     if unit not in PI_UNITS:
         return {"error": f"unit not allowed; choose from {PI_UNITS}"}
+    if node not in remote.NODES:
+        return {"error": f"unknown node; choose from {sorted(remote.NODES)}"}
     return remote.pi(f"systemctl status {unit} --no-pager -n 0 | head -5; "
-                     f"journalctl -u {unit} -n {min(int(lines), 200)} --no-pager -o short-iso", timeout=30)
+                     f"journalctl -u {unit} -n {min(int(lines), 200)} --no-pager -o short-iso", timeout=30, node=node)
 
 
 def _psql(sql: str) -> str:
@@ -209,3 +219,9 @@ def camera_frame(camera: str = "demo-linovision") -> dict:
         return {"error": f"no preview frame at {p}"}
     return {"path": p, "bytes": st.st_size, "age_s": round(time.time() - st.st_mtime),
             "mtime_utc": datetime.fromtimestamp(st.st_mtime, timezone.utc).isoformat(timespec="seconds")}
+
+
+def bb_incidents(n: int = 10) -> dict:
+    """The proactive watcher's incident log (bigbrother/watch.py)."""
+    path = os.path.join(os.environ.get("BB_STATE", "/var/lib/netra-bigbrother"), "incidents.jsonl")
+    return {"file": path, "last": _tail_jsonl(path, min(int(n), 50))}

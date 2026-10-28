@@ -84,7 +84,8 @@ async def on_message(m: discord.Message):
             await send(m, "Nothing pending (proposals expire after 10 min).")
             return
         async with m.channel.typing():
-            res = await asyncio.to_thread(actions.run, p["action"], request_text=text, confirmed=True)
+            res = await asyncio.to_thread(actions.run, p["action"], request_text=text, target=p.get("target", ""),
+                                          confirmed=True)
         log.write({"kind": "fix", "confirmed": True, "pending": p, "result": res})
         status = "done" if res.get("ok") else ("REFUSED: " + res["refused"] if "refused" in res else f"FAILED (rc {res.get('rc')})")
         await send(m, f"`{p['action']}` ({p['what']}): {status}\n```\n{(res.get('out', '') + res.get('err', ''))[-1500:]}\n```")

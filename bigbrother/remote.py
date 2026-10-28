@@ -13,9 +13,11 @@ import re
 import subprocess
 
 SSH_DIR = os.environ.get("BB_SSH_DIR", "/var/lib/netra-bigbrother/ssh")
-PI_HOST = os.environ.get("BB_PI_HOST", "demo-node")
 PI_USER = os.environ.get("BB_PI_USER", "netra")
-REV_PORT = os.environ.get("BB_PI_REV_PORT", "2201")
+# node -> its noderev reverse-tunnel port on the droplet; camera -> the node that pushes it
+NODES = dict(kv.split(":") for kv in os.environ.get("BB_NODES", "demo-node:2201 demo-node2:2202").split())
+CAMERAS = dict(kv.split(":") for kv in os.environ.get(
+    "BB_CAMERAS", "demo-linovision:demo-node demo-linovision-2:demo-node2").split())
 POD_UNIT = os.environ.get("BB_POD_UNIT", "/etc/systemd/system/netra-ask-cloud-tunnel.service")
 
 
@@ -43,20 +45,22 @@ def droplet(script: str, timeout: int = 60) -> dict:
     return {"via": "droplet", **_run(["bash", "-s"], script, timeout)}
 
 
-def pi(script: str, timeout: int = 45, prefer: str = "tailnet") -> dict:
+def pi(script: str, timeout: int = 45, prefer: str = "tailnet", node: str = "demo-node") -> dict:
     """prefer='rev' goes through the reverse tunnel first (use it to restart tailscaled)."""
+    if node not in NODES:
+        return {"via": "pi:none", "rc": 255, "out": "", "err": f"unknown node {node}; known: {sorted(NODES)}"}
     routes = {
-        "tailnet": _ssh_base() + [f"{PI_USER}@{PI_HOST}", "bash -s"],
-        "rev": _ssh_base(REV_PORT, f"{PI_HOST}-rev") + [f"{PI_USER}@127.0.0.1", "bash -s"],
+        "tailnet": _ssh_base() + [f"{PI_USER}@{node}", "bash -s"],
+        "rev": _ssh_base(NODES[node], f"{node}-rev") + [f"{PI_USER}@127.0.0.1", "bash -s"],
     }
     order = ["rev", "tailnet"] if prefer == "rev" else ["tailnet", "rev"]
     tried = []
     for r in order:
         res = _run(routes[r], script, timeout)
         if res["rc"] != 255:            # 255 = ssh itself failed (no route / auth); anything else is the script's rc
-            return {"via": f"pi:{r}", "tried": tried, **res}
+            return {"via": f"{node}:{r}", "tried": tried, **res}
         tried.append({"route": r, "err": res["err"].strip()[-300:]})
-    return {"via": "pi:none", "rc": 255, "out": "", "err": "Pi unreachable on both routes", "tried": tried}
+    return {"via": f"{node}:none", "rc": 255, "out": "", "err": f"{node} unreachable on both routes", "tried": tried}
 
 
 def pod_target(unit_text: str | None = None) -> tuple[str, str] | None:

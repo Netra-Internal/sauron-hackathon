@@ -20,6 +20,8 @@ def state(tmp_path, monkeypatch):
     monkeypatch.setattr(remote, "_run", no_network)
     monkeypatch.setattr(actions, "STATE", str(tmp_path))
     monkeypatch.setattr("bigbrother.log.STATE", str(tmp_path))
+    monkeypatch.setattr("bigbrother.watch.STATE", str(tmp_path))
+    monkeypatch.setattr("bigbrother.watch.NODEGUARD", str(tmp_path))      # nodeguard notes go to the temp dir too
     return tmp_path
 
 
@@ -74,7 +76,7 @@ def test_thanks_reply_exact_and_capped():
 # --- what it may change --------------------------------------------------------------------------------------------
 
 def fake_exec(calls):
-    def ex(a):
+    def ex(a, node="", cam=""):
         calls.append(a)
         return {"rc": 0, "out": "ok", "err": ""}
     return ex
@@ -91,25 +93,25 @@ def test_unknown_action_refused_even_with_yes():
 
 def test_safe_fix_needs_williams_fix_request():
     calls = []
-    r = actions.run("restart_pi_push", request_text="is the camera ok?", execute=fake_exec(calls))
+    r = actions.run("restart_push", request_text="is the camera ok?", execute=fake_exec(calls))
     assert not r["ok"] and calls == []
-    r = actions.run("restart_pi_push", request_text="restart the push", execute=fake_exec(calls))
+    r = actions.run("restart_push", request_text="restart the push", execute=fake_exec(calls))
     assert r["ok"] and len(calls) == 1
 
 
 def test_confirm_action_needs_yes():
     calls = []
-    r = actions.run("reboot_pi", request_text="fix it, reboot the pi", execute=fake_exec(calls))
+    r = actions.run("reboot_node", request_text="fix it, reboot the pi", execute=fake_exec(calls))
     assert not r["ok"] and "yes" in r["refused"] and calls == []
-    assert actions.propose("reboot_pi", "push dead after restart")["ok"]
+    assert actions.propose("reboot_node", "push dead after restart")["ok"]
     p = actions.take_pending()
-    assert p["action"] == "reboot_pi" and actions.pending() is None
-    r = actions.run(p["action"], request_text="yes", confirmed=True, execute=fake_exec(calls))
+    assert p["action"] == "reboot_node" and p["target"] == "demo-node" and actions.pending() is None
+    r = actions.run(p["action"], request_text="yes", target=p["target"], confirmed=True, execute=fake_exec(calls))
     assert r["ok"] and calls[0].what.startswith("reboot")
 
 
 def test_pending_expires():
-    actions.propose("reboot_pi", "x", now=1000)
+    actions.propose("reboot_node", "x", now=1000)
     assert actions.pending(now=1000 + actions.PENDING_TTL_S - 1)
     assert actions.pending(now=1000 + actions.PENDING_TTL_S + 1) is None
 
@@ -124,10 +126,12 @@ def test_cooldown():
 
 def test_every_runbook_action_is_a_fixed_script():
     assert {n for n, a in actions.ACTIONS.items() if a.kind == "safe"} == {
-        "restart_pi_push", "restart_pi_tailscaled", "restart_pod_jev_watcher", "rerun_r2_archiver",
+        "restart_push", "restart_tailscaled", "restart_pod_jev_watcher", "rerun_r2_archiver",
         "restart_netra_ask", "restart_phonealert"}
     for a in actions.ACTIONS.values():
-        assert a.where in ("pi", "pod", "droplet") and a.script.strip()
+        assert a.where in ("node", "pod", "droplet") and a.script.strip()
+    assert "{" not in actions.render(actions.ACTIONS["restart_pod_jev_watcher"], "demo-node", "demo-linovision") \
+        .replace("${loop:-none}", "")
 
 
 # --- the MCP gate Claude goes through ------------------------------------------------------------------------------
@@ -142,11 +146,11 @@ def call(name, args, request, monkeypatch, calls):
 
 def test_mcp_run_fix_uses_williams_message(monkeypatch):
     calls = []
-    assert not call("run_fix", {"action": "restart_pi_push"}, "how is the pi?", monkeypatch, calls)["ok"]
-    assert not call("run_fix", {"action": "reboot_pi"}, "fix it", monkeypatch, calls)["ok"]
+    assert not call("run_fix", {"action": "restart_push"}, "how is the pi?", monkeypatch, calls)["ok"]
+    assert not call("run_fix", {"action": "reboot_node"}, "fix it", monkeypatch, calls)["ok"]
     assert not call("run_fix", {"action": "curl_evil"}, "fix it", monkeypatch, calls)["ok"]
     assert calls == []
-    assert call("run_fix", {"action": "restart_pi_push"}, "fix it", monkeypatch, calls)["ok"]
+    assert call("run_fix", {"action": "restart_push"}, "fix it", monkeypatch, calls)["ok"]
     assert len(calls) == 1
 
 
@@ -179,3 +183,182 @@ def test_pod_target_from_tunnel_unit():
             "root@203.0.113.7")
     assert remote.pod_target(real) == ("203.0.113.7", "57061")
     assert remote.pod_target("nothing") is None
+
+
+# --- targets and the reboot gate -----------------------------------------------------------------------------------
+
+def test_targets_are_from_the_fixed_lists():
+    calls = []
+    assert not actions.run("restart_push", request_text="fix it", target="evil; rm -rf /", execute=fake_exec(calls))["ok"]
+    assert not actions.run("restart_pod_jev_watcher", request_text="fix it", target="axis-q6215",
+                           execute=fake_exec(calls))["ok"]
+    assert calls == []
+    r = actions.run("restart_push", request_text="fix it", target="demo-node2", execute=fake_exec(calls))
+    assert r["ok"] and r["target"] == "demo-node2"
+    # cooldown is per target
+    assert actions.run("restart_push", request_text="fix it", target="demo-node", execute=fake_exec(calls))["ok"]
+
+
+def test_auto_reboot_only_after_failed_push_restart_and_once_per_30_min():
+    calls = []
+    r = actions.run("reboot_node", request_text="", target="demo-node2", auto=True, execute=fake_exec(calls), now=10_000)
+    assert not r["ok"] and calls == []                                   # no failed push restart yet
+    actions.note_push_failed("demo-node2", now=10_000)
+    assert not actions.run("reboot_node", request_text="", target="demo-node", auto=True, execute=fake_exec(calls),
+                           now=10_010)["ok"]                             # the failure was on the other node
+    assert actions.run("reboot_node", request_text="", target="demo-node2", auto=True, execute=fake_exec(calls),
+                       now=10_010)["ok"]
+    actions.note_push_failed("demo-node2", now=10_600)
+    r = actions.run("reboot_node", request_text="", target="demo-node2", auto=True, execute=fake_exec(calls), now=10_610)
+    assert not r["ok"] and "once per 1800" in r["refused"]
+    r = actions.run("reboot_node", request_text="yes", target="demo-node2", confirmed=True, execute=fake_exec(calls),
+                    now=10_620)
+    assert not r["ok"]                                                   # even William's yes respects the 30 min
+    actions.note_push_failed("demo-node2", now=20_000)
+    assert not actions.run("reboot_node", request_text="", target="demo-node2", auto=True, execute=fake_exec(calls),
+                           now=20_000 + actions.REBOOT_AFTER_S + 1)["ok"]  # the push failure is too old
+    assert len(calls) == 1
+
+
+def test_reboot_script_refuses_without_overlay_root():
+    s = actions.render(actions.ACTIONS["reboot_node"], "demo-node2", "")
+    assert 'findmnt -n -o FSTYPE /' in s and 'exit 4' in s and s.index("exit 4") < s.index("reboot &&") \
+        if "reboot &&" in s else s.index("exit 4") < s.index("systemctl reboot")
+
+
+def test_claude_cannot_auto_run():
+    import inspect
+    src = inspect.getsource(mcp_server.call)
+    assert "auto" not in src and "confirmed" not in src
+
+
+# --- proactive watcher ---------------------------------------------------------------------------------------------
+
+from bigbrother import watch  # noqa: E402
+
+NOW = 1_800_000_000.0
+
+
+def test_camera_issue_detection():
+    states = {"demo-node": {"node": "online", "video": "up"},
+              "demo-node2": {"node": "online", "video": "down", "video_since": "2026-10-27T23:08:55+00:00",
+                             "last_report": {"push_active": False}}}
+    fh = {"demo-linovision": {"age_s": 5, "fps": 5.3, "beats": 18}}
+    iss = watch.camera_issues(fh, states, NOW)
+    assert [i.key for i in iss] == ["cam:demo-linovision-2"]
+    assert any("push_active=false" in e for e in iss[0].evidence) and any("no heartbeat" in e for e in iss[0].evidence)
+    fh["demo-linovision"] = {"age_s": 5, "fps": 1.2, "beats": 18}
+    assert "cam:demo-linovision" in [i.key for i in watch.camera_issues(fh, states, NOW)]
+    fh["demo-linovision"] = {"age_s": 400, "fps": None, "beats": 0}
+    assert "cam:demo-linovision" in [i.key for i in watch.camera_issues(fh, states, NOW)]
+    # scheduled off / node offline -> no camera incident
+    states["demo-node2"]["video_sched"] = True
+    states["demo-node"]["node"] = "offline"
+    assert watch.camera_issues(fh, states, NOW) == []
+
+
+def test_event_issues():
+    ev = [{"t": "2026-10-27T17:28:14+00:00", "node": "demo-node", "kind": "tailscale", "state": "restarted",
+           "at": "2026-10-27T17:28:00+00:00", "text": "restarted tailscaled"},
+          {"t": "2026-10-27T17:14:16+00:00", "node": "demo-node", "kind": "throttle", "bits": "0x80008"},
+          {"t": "2026-10-27T17:14:16+00:00", "node": "demo-node", "kind": "throttle", "bits": "0x50005"}]
+    assert [i.key for i in watch.event_issues(ev)] == ["tailscale:demo-node", "uv:demo-node"]
+
+
+def test_events_cursor_starts_at_end_and_reads_only_new(tmp_path, monkeypatch):
+    monkeypatch.setattr(watch, "NODEGUARD", str(tmp_path))
+    f = tmp_path / "events.jsonl"
+    f.write_text('{"t":"x","kind":"old"}\n')
+    st = {}
+    assert watch.new_events(st) == []
+    with open(f, "a") as fh:
+        fh.write('{"t":"y","kind":"new"}\n{"t":"z","kind":"part')
+    assert [e["kind"] for e in watch.new_events(st)] == ["new"]
+    with open(f, "a") as fh:
+        fh.write('ial"}\n')
+    assert [e["kind"] for e in watch.new_events(st)] == ["partial"]
+
+
+def test_message_mentions_only_when_not_fixed():
+    i = watch.Issue("cam:x", "cam", "x", "x down", ["e1"])
+    t, m = watch.message(i, ["restarted push"], True, "42")
+    assert not m and "<@42>" not in t and "FIXED" in t
+    t, m = watch.message(i, ["nothing"], False, "42")
+    assert m and "<@42>" in t and "NOT FIXED" in t
+    assert len(watch.message(i, ["x" * 3000], False, "42")[0]) <= 1901
+
+
+def run(monkeypatch, issues_seq, results, now0=NOW):
+    """Drive run_pass with canned detections; returns (posts, state)."""
+    posts, state = [], {"open": {}, "posts": []}
+    for n, issues in enumerate(issues_seq):
+        monkeypatch.setattr(watch, "detect", lambda s, now, iss=issues: ([watch.Issue(**i) for i in iss], {}))
+        watch.run_pass(state, now0 + n * 60, handle=lambda i, did: results[i.key],
+                       poster=lambda text, mention: posts.append((text, mention)) or {"status": 200})
+    return posts, state
+
+
+CAM = dict(key="cam:demo-linovision-2", kind="cam", target="demo-linovision-2", title="down", evidence=["e"])
+
+
+def test_one_post_per_incident_and_close(monkeypatch):
+    posts, state = run(monkeypatch, [[CAM]] * 5 + [[], [], []], {CAM["key"]: True})
+    assert len(posts) == 1 and not posts[0][1]                       # fixed -> one post, no mention
+    assert state["open"] == {}                                       # closed after 2 clear passes
+
+
+def test_unfixed_mentions_once_retries_hourly_and_posts_recovery(monkeypatch):
+    results = {CAM["key"]: False}
+    posts, state = run(monkeypatch, [[CAM]] * 30, results)          # 30 min still broken
+    assert len(posts) == 1 and posts[0][1]                          # one mention, no repeats
+    assert state["open"][CAM["key"]]["attempts"] == 1
+    posts, state = run(monkeypatch, [[CAM]] * 62, results)          # an hour later: silent retry
+    assert len(posts) == 1 and state["open"][CAM["key"]]["attempts"] == 2
+    posts, _ = run(monkeypatch, [[CAM]] * 3 + [[], []], results)    # recovers on its own -> one quiet note
+    assert len(posts) == 2 and "recovered" in posts[1][0] and not posts[1][1]
+
+
+def test_tailscale_events_merge_within_an_hour(monkeypatch):
+    ts = dict(key="tailscale:demo-node", kind="tailscale", target="demo-node", title="ts", evidence=[])
+    posts, _ = run(monkeypatch, [[ts], [], [ts], [], [ts]], {ts["key"]: True})
+    assert len(posts) == 1
+
+
+def test_post_rate_limit(monkeypatch):
+    many = [dict(key=f"watcher:c{n}", kind="watcher", target=f"c{n}", title="w", evidence=[]) for n in range(10)]
+    posts, _ = run(monkeypatch, [many], {m["key"]: True for m in many})
+    assert len(posts) == watch.MAX_POSTS_PER_HOUR
+
+
+def test_camera_playbook_push_then_reboot(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(actions.run, "__kwdefaults__", {**actions.run.__kwdefaults__, "execute": fake_exec(calls)})
+    monkeypatch.setattr(watch, "probe_node", lambda node: {"tailnet": True, "rev": False, "reachable": True,
+                                                           "out": "push: inactive", "err": ""})
+    monkeypatch.setattr(watch.time, "sleep", lambda s: None)
+    feeds = iter([None, {"fps": 5.1, "age_s": 4}])                  # down after the push restart, back after reboot
+    monkeypatch.setattr(watch, "wait_feed", lambda cam, t: next(feeds))
+    i = watch.Issue("cam:demo-linovision-2", "cam", "demo-linovision-2", "down", [])
+    did = []
+    assert watch.fix_camera(i, did) is True
+    assert [c.script == actions.ACTIONS["reboot_node"].script for c in calls] == [False, True]
+    assert any("verified after reboot" in d for d in did)
+    notes = (tmp_path / "events.jsonl").read_text().splitlines()
+    assert len(notes) == 2 and all('"state": "bigbrother"' in n for n in notes)
+    # same thing again 10 min later: push restart is in cooldown and the reboot is refused (once per 30 min)
+    feeds = iter([None])
+    monkeypatch.setattr(watch, "wait_feed", lambda cam, t: next(feeds))
+    did = []
+    assert watch.fix_camera(i, did) is False and len(calls) == 2
+    assert any("refused" in d for d in did)
+
+
+def test_unreachable_node_is_not_fixed():
+    i = watch.Issue("node:demo-node2", "node", "demo-node2", "offline", [])
+    did = []
+    watch_probe = watch.probe_node
+    try:
+        watch.probe_node = lambda node: {"tailnet": False, "rev": False, "reachable": False, "out": "", "err": ""}
+        assert watch.fix_node(i, did) is False and "unreachable" in did[0]
+    finally:
+        watch.probe_node = watch_probe

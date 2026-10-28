@@ -1,0 +1,18 @@
+[Unit]
+Description=Big Brother proactive watcher: nodeguard/feed_health/pod issues -> investigate, allowlisted fix, verify, one Discord post per incident
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+# root for the same reasons as netra-bigbrother (nodeguard state, psql via sudo, ssh key). No Claude here: detection,
+# playbooks and fixes are code (bigbrother/watch.py) gated by bigbrother/actions.py.
+WorkingDirectory=/opt/netra/bigbrother
+EnvironmentFile=/etc/netra-bigbrother.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/netra/bigbrother/.venv/bin/python -m bigbrother.watch
+Restart=always
+RestartSec=30
+MemoryMax=300M
+
+[Install]
+WantedBy=multi-user.target
