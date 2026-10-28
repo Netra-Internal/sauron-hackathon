@@ -9,6 +9,12 @@ wlan0 2.6; demo-node2 wlan1 1.7-2.0, wlan0 0.86 (same UCSD-GUEST AP, weaker sign
 The push must stay well under it: a stalled upload makes ffmpeg stop reading, the camera drops the RTSP session, and the
 relaunch churn wedges the Pi encoder. demo-node2 therefore pushes 800 kbit/s, GOP 3 s (`PUSH_VCODEC` in
 `/etc/netra-cloud-push.env`, `FALLBACK_VCODEC` in `/etc/default/netra-node-push-health`); demo-node 1.5 Mbit/s.
+demo-node2's push uses libx264 (no hardware encoder churn) and `select=...gte(t-prev_selected_t,0.095)` with
+`-fps_mode passthrough` instead of `fps=10`: `fps=10` pads uplink stalls with duplicate frames, which the edge skips.
+**demo-node2's wlan1 is pinned to one AP** (`802-11-wireless.bssid`, both layers): below -65 dBm NetworkManager's
+bgscan (`simple:30:-65:300`) scanned every 30 s and kept roaming to a congested AP; a pinned BSSID disables bgscan.
+If that AP goes away wlan1 stays down (wlan0 at ~0.9 Mbit/s carries on); unpin: `nmcli c mod UCSD-GUEST 802-11-wireless.bssid ""`.
+Planned restarts: set Big Brother's maintenance flag first (`/var/lib/netra-bigbrother/maintenance-<scope>` on the droplet).
 
 demo-node2 (Oct 27) is the same build with a second Linovision (camera id `demo-linovision-2`) and gets the same set,
 with its own relay key, its own noderev key and port (2202), `TS_UP_ARGS="--hostname=demo-node2"` in
