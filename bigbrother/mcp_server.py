@@ -11,7 +11,7 @@ import os
 import sys
 import time
 
-from . import actions, log, reads, remote
+from . import actions, askdata, log, reads, remote
 
 TOOLS = {
     "node_status": (reads.node_status, "a camera node (Pi): temperature, throttled bits decoded, uptime, "
@@ -31,6 +31,21 @@ TOOLS = {
     "explain_decision": (reads.explain_decision, "one engine decision in full: why[], rule, confidence, evidence "
                          "(cameras, position, boxes), the site track, and whether it was forwarded as an incident.",
                          {"decision_id": {"type": "string"}}),
+    "bike_log": (askdata.bikelog, "BIKE LOG. Vocabulary: login / logged in / registered / check-in = a PARK (bike parked, "
+                 "parker indexed); logout / took a bike = a TAKE (scored against logged-in parkers: matched = owner, "
+                 "flagged = possible theft). Returns the bike log's own day line (python -m ask.bikelog), who is logged "
+                 "in now per camera/zone (counts + times only) and recent parks/takes/matches/flags (rack_audit).",
+                 {"day": {"type": "string", "default": "today"}, "hours": {"type": "number", "default": 48}}),
+    "site_shapes": (askdata.site_shapes, "SHAPES / ZONES per camera: the drawn Jev area (normalised polygon), the site-"
+                    "layer zones (type, rules) in and out of view, and which bike racks (site assets) each camera covers "
+                    "(projected with its fitted pose). Use for 'which camera covers which rack', 'what shapes are drawn'.",
+                    {"camera": {"type": "string", "default": ""}}),
+    "calibration": (askdata.calibration, "calibration grade per camera WITH the reasons (why it is good/usable/bad) and "
+                    "key numbers (leave-one-out error in metres, reprojection px, height, pitch).",
+                    {"camera": {"type": "string", "default": ""}}),
+    "zone_activity": (askdata.zone_activity, "people entering / staying in zones over a window (engine zone stays). "
+                      "Says whether the engine endpoint is deployed yet and what to use meanwhile.",
+                      {"zone": {"type": "string", "default": ""}, "hours": {"type": "number", "default": 2}}),
     "incidents": (reads.bb_incidents, "Big Brother's own proactive incidents (what the watcher detected, did, and the result).",
                   {"n": {"type": "integer", "default": 10}}),
     "camera_health": (reads.camera_health, "production DB view of a camera: feed_health heartbeats (fps, frame age, "

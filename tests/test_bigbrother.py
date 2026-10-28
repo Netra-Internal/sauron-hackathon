@@ -498,3 +498,42 @@ def test_engine_reads_refuse_bad_input():
     assert "error" in reads.engine_status("x'; drop table engine_health;--")
     assert "error" in reads.decisions("nope")
     assert "error" in reads.explain_decision("1' or '1'='1")
+
+
+# --- site context tools (bike log, shapes, calibration, zone activity) ---------------------------------------------
+
+from bigbrother import askdata  # noqa: E402
+
+
+def test_ask_env_parses_values_with_spaces(tmp_path):
+    f = tmp_path / "ask.env"
+    f.write_text('# c\nA=1\nDISPATCH_WEBHOOK=http://a:1 http://b:2\nQ="x y"\n\nBAD LINE\n')
+    env = askdata.ask_env(str(f))
+    assert env["DISPATCH_WEBHOOK"] == "http://a:1 http://b:2" and env["Q"] == "x y" and env["A"] == "1"
+    assert "/usr/sbin" in env["PATH"]
+
+
+def test_site_tools_validate_input(monkeypatch):
+    monkeypatch.setattr(askdata, "run", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not run")))
+    assert "error" in askdata.calibration("x'; drop")
+    assert "error" in askdata.site_shapes("../../etc")
+    assert "error" in askdata.bikelog(day="yesterday; rm -rf /")
+
+
+def test_zone_activity_finds_the_engine_route_when_it_exists(tmp_path, monkeypatch):
+    (tmp_path / "ask").mkdir()
+    api = tmp_path / "ask" / "api.py"
+    api.write_text('@app.get(P + "/api/sites/{sid}/cameras/{cid}/zones")\n')
+    monkeypatch.setattr(askdata, "ASK_DIR", str(tmp_path))
+    r = askdata.zone_activity()
+    assert not r["available"] and "not deployed yet" in r["status"]
+    api.write_text(api.read_text() + '@app.get(P + "/api/sites/{sid}/zones/activity")\n')
+    r = askdata.zone_activity()
+    assert r["available"] and r["routes_found"] == ["/api/sites/{sid}/zones/activity"]
+
+
+def test_new_tools_are_listed():
+    names = {t["name"] for t in mcp_server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})["result"]["tools"]}
+    assert {"bike_log", "site_shapes", "calibration", "zone_activity"} <= names
+    desc = next(t for t in mcp_server.tool_list() if t["name"] == "bike_log")["description"]
+    assert "login" in desc and "PARK" in desc and "TAKE" in desc
