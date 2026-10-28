@@ -8,6 +8,8 @@ netra-ask's bucket ingest takes 2-12 s per POST and the edge poster is sequentia
   logged, never deleted. Memory holds file names only; a spool over HACK_RELAY_MAX_MB answers 503, so the edge keeps the
   bucket and retries itself.
 - GET api/edge/config, POST api/edge/heartbeat: plain synchronous pass-through (netra-ask checks the token).
+- GET api/edge/jev_area, POST api/dispatch/incidents and api/dispatch/watch: the same pass-through, for an edge that runs
+  the Jev watcher in-process (ask.edge.main --jev on) and so posts through this base URL too.
 """
 from __future__ import annotations
 
@@ -182,7 +184,7 @@ async def _passthrough(request: Request, path: str) -> Response:
     headers = {k: request.headers[k] for k in KEEP_HEADERS if k in request.headers}
     async with httpx.AsyncClient(timeout=60) as c:
         try:
-            r = await c.request(request.method, f"{ASK_URL}/api/edge/{path}", params=request.query_params,
+            r = await c.request(request.method, f"{ASK_URL}/api/{path}", params=request.query_params,
                                 content=await request.body(), headers=headers)
         except Exception as e:
             raise HTTPException(502, f"netra-ask unreachable: {type(e).__name__}")
@@ -191,12 +193,27 @@ async def _passthrough(request: Request, path: str) -> Response:
 
 @router.get("/api/edge/config")
 async def config(request: Request):
-    return await _passthrough(request, "config")
+    return await _passthrough(request, "edge/config")
 
 
 @router.post("/api/edge/heartbeat")
 async def heartbeat(request: Request):
-    return await _passthrough(request, "heartbeat")
+    return await _passthrough(request, "edge/heartbeat")
+
+
+@router.get("/api/edge/jev_area")
+async def jev_area(request: Request):
+    return await _passthrough(request, "edge/jev_area")
+
+
+@router.post("/api/dispatch/incidents")
+async def dispatch_incident(request: Request):
+    return await _passthrough(request, "dispatch/incidents")
+
+
+@router.post("/api/dispatch/watch")
+async def dispatch_watch(request: Request):
+    return await _passthrough(request, "dispatch/watch")
 
 
 @router.get("/status")

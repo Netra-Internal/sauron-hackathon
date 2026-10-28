@@ -26,7 +26,9 @@ PREFIX = "/hack"
 LOGIN = "/map/login?next=/hack/"
 # machine routes that check the worker Bearer token themselves (hackdash.live: nginx mirror of the edge bucket POST)
 NO_LOGIN = {f"{PREFIX}/api/_edge/bucket", f"{PREFIX}/relay/api/edge/bucket", f"{PREFIX}/relay/api/edge/config",
-            f"{PREFIX}/relay/api/edge/heartbeat"}   # hackdash.relay: the edge's ask base URL; token checked by us/netra-ask
+            f"{PREFIX}/relay/api/edge/heartbeat", f"{PREFIX}/relay/api/edge/jev_area",
+            f"{PREFIX}/relay/api/dispatch/incidents", f"{PREFIX}/relay/api/dispatch/watch"}
+# hackdash.relay: the edge's ask base URL; token checked by us/netra-ask
 
 sys.path.insert(0, os.environ.get("ASK_INTERNAL_DIR", "/opt/netra/netra-internal"))
 NO_AUTH = os.environ.get("HACK_NO_AUTH") == "1"
