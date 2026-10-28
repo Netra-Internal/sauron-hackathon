@@ -44,7 +44,9 @@ with its own relay key, its own noderev key and port (2202), `TS_UP_ARGS="--host
   - tunnel: the Pi's `tunnel_up` in a fresh report. UCSD-GUEST changes the public NAT IP under a live session, so the droplet cannot match sessions by IP;
   - video: feed_health has a row with `fps_analysed >= 0.5` in the last 3 min (rows arriving with fps 0 = DOWN);
   - boots and throttled bits, from the reports.
-  Transitions go to the append-only `/var/lib/netra-nodeguard/events.jsonl` and to Discord:
+  Transitions go to the append-only `/var/lib/netra-nodeguard/events.jsonl`. **Discord is silent since Oct 28**
+  (William: only "criminal detected" or "down AND Big Brother couldn't fix it", posted by Big Brother);
+  `DISCORD_POSTS=1` in the env restores these posts:
   - with a mention: OFFLINE, video DOWN, under-voltage (once per outage/boot);
   - without a mention: back ONLINE, video recovered, rebooted.
   - still OFFLINE / still video DOWN: a reminder with a mention every 6 h (`REMIND_H`) while it lasts;

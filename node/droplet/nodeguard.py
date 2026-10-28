@@ -59,6 +59,9 @@ VIDEO_DOWN_AFTER_S = int(os.environ.get("VIDEO_DOWN_AFTER_S", "180"))
 REPORT_FRESH_S = int(os.environ.get("REPORT_FRESH_S", "180"))
 VIDEO_MIN_FPS = float(os.environ.get("VIDEO_MIN_FPS", "0.5"))
 REMIND_S = int(float(os.environ.get("REMIND_H", "6")) * 3600)
+# William, Oct 28: Discord gets only "criminal detected" and "down AND Big Brother couldn't fix it" (Big Brother decides).
+# DISCORD_POSTS=0 (the default) keeps every transition in the event log and posts nothing; 1 restores the old posts.
+DISCORD_POSTS = os.environ.get("DISCORD_POSTS", "0") == "1"
 UV_BITS = (1 << 0) | (1 << 16)   # under-voltage now / since boot
 # Approved night off (William, Oct 26): "Mon-Fri 01:00-06:00 America/Los_Angeles" (days = the mornings). Inside it, plus
 # QUIET_EARLY_MIN before (the staged poweroff runs at 00:58) and until BACK_BY_MIN after, outages are logged as
@@ -370,6 +373,9 @@ def cmd_check(_args) -> int:
         print(json.dumps(e))
     failed = 0
     for text, mention in posts:
+        if not DISCORD_POSTS:
+            print(f"silent (DISCORD_POSTS=0): {text}")
+            continue
         try:
             discord(text, mention)
         except Exception as e:
