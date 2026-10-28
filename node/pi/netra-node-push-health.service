@@ -1,0 +1,7 @@
+[Unit]
+Description=Push health: restart a push that publishes nothing; libx264 fallback if the Pi encoder hangs; reboot as the last resort (max 1 per 30 min)
+RequiresMountsFor=/boot/firmware
+[Service]
+Type=oneshot
+TimeoutStartSec=120
+ExecStart=/usr/local/sbin/netra-node-push-health

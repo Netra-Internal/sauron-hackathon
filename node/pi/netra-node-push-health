@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# netra-node-push-health (demo-node2 incident, Oct 27-28: the push unit stayed "active" for 18 h while nothing reached
+# the pod; the Pi 4's h264_v4l2m2m encoder was wedged, so even a 3 s test encode hung). Every minute, as root.
+# cloud/push.sh writes /run/netra-cloud-push/<cam>.alive = "<frames> <uptime s of the last new output frame>" and already
+# relaunches a camera's ffmpeg after 60 s without output. This is the next level, when that has not helped for STALL_MIN:
+#   1. stop netra-cloud-push (KillMode=control-group takes every ffmpeg with it), wait 3 s, then test the hardware
+#      encoder alone: a 3 s testsrc encode with h264_v4l2m2m, abandoned after 20 s. Never next to a live encode: on
+#      Oct 28 the bcm2835 codec driver oopsed when encoder sessions were opened/closed in quick succession.
+#      - OK   -> start the push again
+#      - hung -> VCODEC_OVERRIDE = libx264 ultrafast 1080p10 1.5 Mbit/s (~1.1 core on a Pi 4 incl. decode, measured)
+#                and start the push. The override lives in /run: the next boot tries the hardware again.
+#   2. still stalled STALL_MIN after the switch, while the camera answers on RTSP and the relay tunnel is up -> reboot,
+#      the last resort, at most once per MIN_REBOOT_GAP_MIN (30). The stamp is shared with the Wi-Fi watchdog
+#      (/boot/firmware/netra-wifi-watchdog/last_reboot), so the two together never reboot more often than that.
+# While it stays stalled the actions back off: 3, 6, 12, 24, then every 30 min. Nothing happens while the push is stopped on purpose (night schedule), the relay tunnel is down (Wi-Fi: the Wi-Fi
+# watchdog's job) or the camera does not answer (a reboot would not fix the camera).
+# Each action goes to /run/netra-push-health/last_action ("<epoch>|<text>"); netra-node-report sends it as push_wd, and
+# the droplet logs it (kind "push") and posts the fallback/reboot ones to Discord.
+set -u
+[ -f /etc/default/netra-node-push-health ] && . /etc/default/netra-node-push-health
+STALL_MIN=${STALL_MIN:-3}; MIN_REBOOT_GAP_MIN=${MIN_REBOOT_GAP_MIN:-30}; DRY=${DRY:-0}
+FALLBACK_VCODEC=${FALLBACK_VCODEC:-"-vf fps=10 -c:v libx264 -preset ultrafast -tune zerolatency -b:v 1500k -maxrate 1500k -bufsize 3000k -g 10 -bf 0 -pix_fmt yuv420p"}
+UNIT=${UNIT:-netra-cloud-push}; PROG_DIR=${PROG_DIR:-/run/netra-cloud-push}; FF=${FF:-/usr/bin/ffmpeg}
+STATE=${STATE:-/run/netra-push-health}; PERSIST=${PERSIST:-/boot/firmware/netra-wifi-watchdog}
+LOG=${LOG:-/var/log/netra-node-push-health.log}; OVERRIDE=$STATE/vcodec
+mkdir -p "$STATE"; chmod 755 "$STATE"
+log(){ logger -t netra-push-health "$*"; echo "$(date -Is) $*" >> "$LOG"; echo "$*"; }
+action(){ log "$*"; echo "$(date +%s)|$*" > "$STATE/last_action"; }
+run(){ if [ "$DRY" = 1 ]; then log "[DRY] would: $*"; else "$@"; fi; }
+
+systemctl is-active -q "$UNIT" || exit 0
+eval "$(grep -E '^(STREAMS|RELAY)=' /etc/netra-cloud-push.env)"   # not sourced: WIFI_IF=wlan0|wlan1 is a pipe to bash
+now=$(cut -d. -f1 /proc/uptime)   # uptime, not the clock: no RTC, and the clock jumps when NTP syncs after boot
+started=$(( $(systemctl show -P ActiveEnterTimestampMonotonic "$UNIT") / 1000000 ))
+[ $((now - started)) -lt $((STALL_MIN * 60)) ] && exit 0   # just (re)started: give it STALL_MIN
+relay=${RELAY#*@}
+ss -tnpH state established dst "$relay" dport = :22 2>/dev/null | grep -q '(("ssh",' || exit 0
+worst=0; wcam=""
+for s in $STREAMS; do
+  cam=${s%%=*}; a=$(cut -d' ' -f2 "$PROG_DIR/$cam.alive" 2>/dev/null || echo 0)
+  [ "$a" -gt "$started" ] 2>/dev/null || a=$started   # nothing since this start: count from the start
+  [ $((now - a)) -gt "$worst" ] && { worst=$((now - a)); wcam=$cam; }
+done
+if [ "$worst" -lt $((STALL_MIN * 60)) ]; then
+  [ -f "$STATE/stalled" ] && { log "push healthy again"; rm -f "$STATE/stalled" "$STATE/streak" "$STATE/next"; }
+  exit 0
+fi
+# no loop: while it stays stalled, actions back off (STALL_MIN, then x2 per action, at most MAX_GAP_MIN apart)
+[ "$now" -lt "$(cat "$STATE/next" 2>/dev/null || echo 0)" ] && exit 0
+streak=$(cat "$STATE/streak" 2>/dev/null || echo 0); gap=$((STALL_MIN << (streak < 4 ? streak : 4)))
+[ $gap -gt "${MAX_GAP_MIN:-30}" ] && gap=${MAX_GAP_MIN:-30}
+camhost=$(echo "$STREAMS" | sed -n 's|.*@\([^:/|]*\).*|\1|p' | head -1)
+if ! timeout 5 bash -c "</dev/tcp/$camhost/554" 2>/dev/null; then
+  [ -f "$STATE/stalled" ] || log "$wcam: no output for ${worst}s, but the camera $camhost does not answer on RTSP: not the Pi's fault, waiting"
+  touch "$STATE/stalled"; exit 0
+fi
+touch "$STATE/stalled"; echo $((streak + 1)) > "$STATE/streak"; echo $((now + gap * 60)) > "$STATE/next"
+nff=$(pgrep -u netra -x ffmpeg | wc -l)
+run systemctl stop "$UNIT"; stopped=1; sleep 3
+trap '[ "${stopped:-0}" = 1 ] && [ "$DRY" != 1 ] && systemctl start "$UNIT"' EXIT   # never leave the push stopped
+# the encoder test runs in the background: a process stuck in the driver cannot even be reaped, so never wait on it
+"$FF" -hide_banner -loglevel error -nostdin -f lavfi -i testsrc=size=1920x1080:rate=10 -t 3 -c:v h264_v4l2m2m -b:v 1500k \
+  -pix_fmt yuv420p -f null - </dev/null >/dev/null 2>&1 & tp=$!
+enc=hung; for i in $(seq 20); do sleep 1; kill -0 $tp 2>/dev/null || { wait $tp && enc=ok || enc=failed; break; }; done
+[ "$enc" = hung ] && kill -9 $tp 2>/dev/null
+why="$wcam: no output frame for $((worst / 60)) min with the push active ($nff ffmpeg running); h264_v4l2m2m test encode $enc"
+if [ ! -s "$OVERRIDE" ]; then
+  if [ "$enc" = ok ]; then
+    action "$why -> restarted $UNIT (stopped, encoder tested alone, started)"
+  else
+    echo "$FALLBACK_VCODEC" > "$OVERRIDE"; chmod 644 "$OVERRIDE"
+    action "$why -> FALLBACK to libx264 (software encode) and restarted $UNIT"
+  fi
+  run systemctl start "$UNIT"; exit 0
+fi
+if [ "$enc" = ok ]; then   # the hardware works again: back to it
+  rm -f "$OVERRIDE"; action "$why, libx264 fallback was active -> back to h264_v4l2m2m, restarted $UNIT"
+  run systemctl start "$UNIT"; exit 0
+fi
+# fallback active and still stalled, camera up, tunnel up: last resort
+ep=$(date +%s); mkdir -p "$PERSIST"   # the stamp is the Wi-Fi watchdog's: epoch, with uptime as the floor
+last=$(cat "$PERSIST/last_reboot" 2>/dev/null || echo 0); gap=$((ep - last)); [ "$gap" -lt "$now" ] && gap=$now
+if [ "$gap" -lt $((MIN_REBOOT_GAP_MIN * 60)) ]; then
+  action "$why, libx264 fallback also stalled -> reboot due but the last one was $((gap / 60)) min ago (< $MIN_REBOOT_GAP_MIN): restarted $UNIT instead"
+  run systemctl start "$UNIT"; exit 0
+fi
+action "$why, libx264 fallback also stalled -> REBOOT (last resort)"
+[ "$DRY" = 1 ] && { log "[DRY] would reboot"; exit 0; }
+stopped=0
+echo "$ep" > "$PERSIST/last_reboot.tmp" && mv "$PERSIST/last_reboot.tmp" "$PERSIST/last_reboot"
+{ echo "$(date -Is) reboot (push-health): $why"; tail -n 49 "$PERSIST/reboots.log" 2>/dev/null || true; } > "$PERSIST/reboots.tmp" &&
+  mv "$PERSIST/reboots.tmp" "$PERSIST/reboots.log"
+sync; systemctl reboot

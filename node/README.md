@@ -16,6 +16,17 @@ with its own relay key, its own noderev key and port (2202), `TS_UP_ARGS="--host
   Log: `/var/log/netra-node-wifi-watchdog.log` (RAM under the overlay) and `/boot/firmware/netra-wifi-watchdog/reboots.log`.
 - `netra-node-report` + timer (every minute). Over Tailscale it POSTs boot_id, uptime, `vcgencmd get_throttled`, load,
   temp, RSSI and whether its push ssh is connected to the relay (`tunnel_up`) to the droplet's receiver. It stores nothing, so it works on the read-only root.
+- `netra-node-push-health` + timer (every minute, root; after the demo-node2 incident of Oct 27-28: 18 h of an
+  "active" push publishing nothing). `cloud/push.sh` keeps exactly one ffmpeg per camera and relaunches one whose output
+  frame count has not grown for 60 s; it writes `/run/netra-cloud-push/<cam>.alive` (uptime-based, the clock jumps at
+  NTP sync). If a camera is still without output for 3 min, with the relay tunnel up and the camera answering on RTSP:
+  - stop the push, wait 3 s, test the hardware encoder alone (3 s testsrc, abandoned after 20 s), start the push again;
+  - test hung -> `/run/netra-push-health/vcodec` = libx264 ultrafast 1080p10 1.5 Mbit/s (measured ~1.1 core vs ~0.8
+    for the hardware path, both incl. software decode), event `push fallback` posted. The next boot tries the hardware again;
+  - fallback also stalled -> reboot, the last resort, at most once per 30 min (stamp shared with the Wi-Fi watchdog).
+  - Actions back off 3, 6, 12, 24, then every 30 min while it stays stalled; the push is never left stopped.
+  The Pi 4's bcm2835 codec driver is fragile: opening a new h264_v4l2m2m session right after killing one oopsed the
+  kernel on demo-node (Oct 28). Hence the settle delays and the test only with the push stopped.
 - `netra-node-camclock` + timer (boot + every 30 min; demo-node2). The camera LAN has no NTP and the camera restarts at
   2000-01-0x after a power loss (burned into the OSD). ISAPI `PUT /System/time` works on this camera, so when its clock
   is more than 30 s off the Pi's NTP time it is set to Pacific time (manual mode). Skipped while the Pi itself is unsynced.
@@ -31,11 +42,13 @@ with its own relay key, its own noderev key and port (2202), `TS_UP_ARGS="--host
   `/etc/netra-nodeguard.d/<node>.env`, state in `state-<node>.json`) observes four things:
   - node: `tailscale ping`, or a Pi report under 3 min old;
   - tunnel: the Pi's `tunnel_up` in a fresh report. UCSD-GUEST changes the public NAT IP under a live session, so the droplet cannot match sessions by IP;
-  - video: feed_health has a row with `fps_analysed > 0` in the last 3 min;
+  - video: feed_health has a row with `fps_analysed >= 0.5` in the last 3 min (rows arriving with fps 0 = DOWN);
   - boots and throttled bits, from the reports.
   Transitions go to the append-only `/var/lib/netra-nodeguard/events.jsonl` and to Discord:
   - with a mention: OFFLINE, video DOWN, under-voltage (once per outage/boot);
   - without a mention: back ONLINE, video recovered, rebooted.
+  - still OFFLINE / still video DOWN: a reminder with a mention every 6 h (`REMIND_H`) while it lasts;
+  - push health: fallback to libx264, back to the hardware encoder, reboot (no mention); its restarts are logged only.
 - `nodeguard.py serve` (`netra-nodeguard-recv`): the receiver, bound to the droplet's Tailscale IP only, with a bearer
   token. Each report is appended to `reports-<node>-YYYY-MM.jsonl` (the load/throttle history).
 - `nodeguard.py timeline --days 7`: the timeline with outage durations, every node (`--node demo-node2` for one).

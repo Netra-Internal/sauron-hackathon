@@ -15,7 +15,9 @@ Observations per check:
            OFFLINE only after OFFLINE_AFTER_S of both failing (DERP-relayed pings drop now and then).
   tunnel : the Pi's report says its push ssh has an established connection to the relay (tunnel_up). Not checked from
            the droplet: UCSD-GUEST changes the public NAT IP under a live session, so matching sessions by IP was wrong.
-  video  : feed_health has a row with fps_analysed > 0 for the camera in the last VIDEO_DOWN_AFTER_S.
+  video  : feed_health has a row with fps_analysed >= VIDEO_MIN_FPS (0.5) for the camera in the last VIDEO_DOWN_AFTER_S.
+           Rows that keep arriving with fps ~0 (the pod's edge is alive but nothing is published) count as DOWN.
+           While a posted outage lasts, a reminder is posted every REMIND_H (6) hours.
   boot   : a new boot_id in the Pi's report. booted_at = received_at - uptime (the Pi has no RTC, so its own clock
            is not trusted). prev_uptime_s = the last uptime the previous boot reported (accurate to ~1 report).
   throttle: every change of the get_throttled bits within a boot. Under-voltage (bit 0 now / bit 16 since boot)
@@ -24,6 +26,7 @@ Observations per check:
 Event log: append-only JSONL, one object per line: {"t": ISO-8601 UTC, "node", "kind", "state", ...details}.
   kinds: node (online|offline), video (up|down), tunnel (up|down), boot (booted), throttle (bits),
          tailscale (restarted|needs-login|action: the Pi's Tailscale watchdog, with its text),
+         push (restarted|fallback|hardware|reboot|action: the Pi's push health, node/pi/netra-node-push-health),
          schedule (off-window|on-window|not-back: the approved night off, SCHEDULE_OFF; node/video rows inside it
          carry "scheduled": true and are not posted),
          note (state "manual", {"text"}: a hand-added annotation; the log is never edited, corrections are appended).
@@ -54,6 +57,8 @@ STATE = STATE_DIR / f"state-{NODE}.json"
 OFFLINE_AFTER_S = int(os.environ.get("OFFLINE_AFTER_S", "180"))
 VIDEO_DOWN_AFTER_S = int(os.environ.get("VIDEO_DOWN_AFTER_S", "180"))
 REPORT_FRESH_S = int(os.environ.get("REPORT_FRESH_S", "180"))
+VIDEO_MIN_FPS = float(os.environ.get("VIDEO_MIN_FPS", "0.5"))
+REMIND_S = int(float(os.environ.get("REMIND_H", "6")) * 3600)
 UV_BITS = (1 << 0) | (1 << 16)   # under-voltage now / since boot
 # Approved night off (William, Oct 26): "Mon-Fri 01:00-06:00 America/Los_Angeles" (days = the mornings). Inside it, plus
 # QUIET_EARLY_MIN before (the staged poweroff runs at 00:58) and until BACK_BY_MIN after, outages are logged as
@@ -127,7 +132,7 @@ def step(state: dict, obs: dict, now: dt.datetime) -> tuple[dict, list[dict], li
     """state + one minute's observations -> (new state, events to log, Discord posts as (text, mention)).
 
     obs: ts_ok (tailscale ping answered), report (latest Pi report or None, with "received_at" ISO),
-         video_ok (fps_analysed > 0 within VIDEO_DOWN_AFTER_S), video_last_ok (ISO of that newest good row, optional),
+         video_ok (fps_analysed >= VIDEO_MIN_FPS within VIDEO_DOWN_AFTER_S), video_last_ok (ISO of that newest good row, optional),
          tunnel_ok (bool or None when unknown).
     """
     st = dict(state)
@@ -201,6 +206,19 @@ def step(state: dict, obs: dict, now: dt.datetime) -> tuple[dict, list[dict], li
                 if st.get(k) in ("offline", "down"):
                     st[f"{k}_posted"] = True
 
+    # still down: remind every REMIND_S (outages that were posted only; counted from the outage start)
+    for k, bad, word in (("node", "offline", "OFFLINE"), ("video", "down", "video DOWN")):
+        if st.get(k) == bad and st.get(f"{k}_posted", True) and not q and REMIND_S > 0:
+            since = parse(st[f"{k}_since"])
+            n = int((now - since).total_seconds() // REMIND_S)
+            if n > st.get(f"{k}_reminded", 0):
+                st[f"{k}_reminded"] = n
+                event(k, "still-" + bad, since=iso(since))
+                posts.append((f"🔴 {NODE} still {word}" + (f" ({CAMERA})" if k == "video" else "")
+                              + f" after {dur((now - since).total_seconds())} (since {iso(since)})", True))
+        elif st.get(k) != bad:
+            st.pop(f"{k}_reminded", None)
+
     # push tunnel (logged only; the video alert covers its effect)
     tun = obs.get("tunnel_ok")
     if tun is not None and st.get("tunnel") != ("up" if tun else "down"):
@@ -238,16 +256,33 @@ def step(state: dict, obs: dict, now: dt.datetime) -> tuple[dict, list[dict], li
             st["uv_posted_boot"] = rep["boot_id"]
         st["last_report"] = rep
 
-    # the Pi's Tailscale watchdog acted (node/pi/netra-node-tailscale-watchdog): log each action once, by its epoch.
-    # Reports can arrive out of order (one retried through a tailscaled restart), so only a NEWER epoch counts.
-    at, _, text = (rep or {}).get("ts_wd", "").partition("|")
-    if at.isdigit() and int(at) > int(st.get("ts_wd_epoch", 0)):
-        kind = "needs-login" if text.startswith("NeedsLogin") else "restarted" if text.startswith("restarted") else "action"
+    # the Pi's watchdogs acted: log each action once. Reports can arrive out of order (one retried through a tailscaled
+    # restart), so within one boot only a NEWER epoch counts. Across boots the epoch can go backwards (no RTC: a Pi
+    # boots with a stale clock until NTP), but the action files live in /run, so anything from a new boot is new.
+    #   ts_wd   node/pi/netra-node-tailscale-watchdog
+    #   push_wd node/pi/netra-node-push-health: restarts are logged only (the video alert covers them); a switch to
+    #           the libx264 fallback, back to the hardware encoder, or a reboot is also posted (no mention)
+    for field in ("ts_wd", "push_wd"):
+        raw = (rep or {}).get(field, "")
+        at, _, text = raw.partition("|")
+        boot = (rep or {}).get("boot_id")
+        if st.get(f"{field}_boot") not in (None, boot):
+            st[f"{field}_epoch"] = 0   # new boot: its actions are all new, whatever its clock says
+        if not at.isdigit() or int(at) <= int(st.get(f"{field}_epoch", 0)):
+            continue
         when = iso(dt.datetime.fromtimestamp(int(at), dt.timezone.utc))
-        event("tailscale", kind, at=when, text=text)
-        if kind != "action":
-            posts.append((f"{'⚠️' if kind == 'needs-login' else '🔧'} {NODE} Tailscale watchdog: {text}", kind == "needs-login"))
-        st["ts_wd_epoch"] = int(at)
+        if field == "ts_wd":
+            kind = "needs-login" if text.startswith("NeedsLogin") else "restarted" if text.startswith("restarted") else "action"
+            event("tailscale", kind, at=when, text=text)
+            if kind != "action":
+                posts.append((f"{'⚠️' if kind == 'needs-login' else '🔧'} {NODE} Tailscale watchdog: {text}", kind == "needs-login"))
+        else:
+            kind = ("reboot" if "-> REBOOT" in text else "fallback" if "FALLBACK" in text else
+                    "hardware" if "back to h264_v4l2m2m" in text else "restarted" if "restarted" in text else "action")
+            event("push", kind, at=when, text=text)
+            if kind in ("reboot", "fallback", "hardware"):
+                posts.append((f"🔧 {NODE} push health: {text}", False))
+        st[f"{field}_epoch"], st[f"{field}_boot"] = int(at), boot
     return st, ev, posts
 
 
@@ -270,9 +305,9 @@ def tailscale_ok(host: str) -> bool:
 
 
 def video_last_ok() -> dt.datetime | None:
-    """received_at of the newest feed_health row with fps_analysed > 0 (last 7 days), by the droplet's clock."""
+    """received_at of the newest feed_health row with fps_analysed >= VIDEO_MIN_FPS (last 7 days), droplet clock."""
     sql = (f"select extract(epoch from max(received_at)) from feed_health where camera_id='{CAMERA}' "
-           f"and fps_analysed > 0 and received_at > now() - interval '7 days'")
+           f"and fps_analysed >= {VIDEO_MIN_FPS} and received_at > now() - interval '7 days'")
     r = subprocess.run(["runuser", "-u", "netra", "--", "psql", "netra_ask", "-At", "-c", sql],
                        capture_output=True, text=True, timeout=30)
     if r.returncode != 0:
@@ -347,7 +382,7 @@ def cmd_check(_args) -> int:
 
 FIELDS = {"node": str, "boot_id": str, "uptime_s": (int, float), "throttled": str, "load1": (int, float),
           "load5": (int, float), "temp_c": (int, float), "tunnel_up": bool, "ts_wd": str, "wd_last_reboot": (int, str),
-          "clock_synced": bool, "rssi_dbm": (int, float), "push_active": bool}
+          "clock_synced": bool, "rssi_dbm": (int, float), "push_active": bool, "push_wd": str, "ffmpeg_n": int}
 
 
 class Receiver(BaseHTTPRequestHandler):
@@ -418,6 +453,8 @@ def timeline(events: list[dict], since: dt.datetime, now: dt.datetime) -> list[s
             line = f"node OFFLINE   (last seen {e['last_seen'][11:19]}Z)" + sched
         elif k == "video" and s == "down":
             line = "video DOWN" + sched
+        elif s.startswith("still-"):
+            line = f"{k} still {s[6:].upper()} (since {e.get('since', '?')[11:19]}Z, reminder posted)"
         elif k == "schedule":
             line = {"off-window": "-- scheduled night off begins (alerts muted)",
                     "on-window": "-- scheduled night off over (alerts on)",
@@ -427,15 +464,15 @@ def timeline(events: list[dict], since: dt.datetime, now: dt.datetime) -> list[s
             line = f"BOOT at {e['booted_at'][:19]}Z{prev}, cause {e.get('cause', 'unknown')}, throttled {e.get('throttled')}"
         elif k == "throttle":
             line = f"throttle bits {s}"
-        elif k == "tailscale":
-            line = f"tailscale {s}: {e.get('text')}"
+        elif k in ("tailscale", "push"):
+            line = f"{k} {s}: {e.get('text')}"
         elif k == "note":   # hand-written annotation (corrections, maintenance), never generated by step()
             line = f"note: {e.get('text')}"
         else:
             line = f"{k} {s}"
         out.append(f"{t:%a %Y-%m-%d %H:%M:%S}Z  {line}")
     for k, down, up in (("node", "offline", "online"), ("video", "down", "up")):
-        last = [e for e in events if e["kind"] == k]
+        last = [e for e in events if e["kind"] == k and e["state"] in (down, up)]
         if last and last[-1]["state"] == down:
             out.append(f"   now: {k} {down.upper()} for {dur((now - parse(last[-1]['t'])).total_seconds())}")
     total = {}

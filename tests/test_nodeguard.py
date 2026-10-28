@@ -209,3 +209,41 @@ def test_timeline_lists_every_node(tmp_path, monkeypatch, capsys):
     ng.cmd_timeline(type("A", (), {"node": "all", "days": 7})())
     out = capsys.readouterr().out
     assert out.index("demo-node timeline") < out.index("demo-node2 timeline")
+
+
+def test_video_down_reminded_every_6_hours_with_mention():
+    steps = [(0, {"ts_ok": True, "video_ok": True})] + \
+            [(m, {"ts_ok": True, "video_ok": False, "video_last_ok": ng.iso(T0)}) for m in range(4, 13 * 60, 30)] + \
+            [(13 * 60, {"ts_ok": True, "video_ok": True})]
+    st, evs, posts = run(steps)
+    rem = [p for p in posts if "still video DOWN" in p[0]]
+    assert len(rem) == 2 and all(p[1] for p in rem)             # at 6 h and 12 h
+    assert len([p for p in posts if "video DOWN:" in p[0]]) == 1
+    assert "video_reminded" not in st
+    text = "\n".join(ng.timeline(evs, T0 - dt.timedelta(days=1), T0 + dt.timedelta(hours=13)))
+    assert "video still DOWN" in text and "was down 13h00m" in text
+
+
+def test_open_outage_duration_ignores_reminder_rows():
+    evs = [{"t": "2026-10-26T10:00:00+00:00", "node": "demo-node", "kind": "video", "state": "down"},
+           {"t": "2026-10-26T16:00:00+00:00", "node": "demo-node", "kind": "video", "state": "still-down", "since": "x" * 20}]
+    assert "now: video DOWN for 12h00m" in "\n".join(ng.timeline(evs, T0 - dt.timedelta(days=1), T0))
+
+
+def test_push_health_actions_logged_and_fallback_posted():
+    acts = ["1793200000|cam: no output frame for 3 min; h264_v4l2m2m test encode ok -> restarted netra-cloud-push",
+            "1793200400|cam: no output ...; h264_v4l2m2m test encode hung -> FALLBACK to libx264 (software encode) and restarted netra-cloud-push",
+            "1793200400|cam: no output ...; h264_v4l2m2m test encode hung -> FALLBACK to libx264 (software encode) and restarted netra-cloud-push"]
+    st, evs, posts = run([(m, {"ts_ok": True, "video_ok": True, "report": rep(T0 + dt.timedelta(minutes=m), push_wd=a)})
+                          for m, a in enumerate(acts)])
+    assert [e["state"] for e in evs if e["kind"] == "push"] == ["restarted", "fallback"]
+    pp = [p for p in posts if "push health" in p[0]]
+    assert len(pp) == 1 and "FALLBACK" in pp[0][0] and pp[0][1] is False
+
+
+def test_watchdog_action_with_stale_boot_clock_still_logged():
+    b = "1793141815|manual: FALLBACK to libx264 ..."   # written right after a reboot, clock still hours behind
+    st, evs, posts = run([(0, {"ts_ok": True, "video_ok": True, "report": rep(T0, push_wd="1793208000|x restarted y")}),
+                          (1, {"ts_ok": True, "video_ok": True, "report": rep(T0 + dt.timedelta(minutes=1), BOOT_B, 30, push_wd=b)}),
+                          (2, {"ts_ok": True, "video_ok": True, "report": rep(T0 + dt.timedelta(minutes=2), BOOT_B, 90, push_wd=b)})])
+    assert [e["state"] for e in evs if e["kind"] == "push"] == ["restarted", "fallback"]
