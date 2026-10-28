@@ -1,5 +1,6 @@
-"""Proactive Big Brother: detect an issue, investigate with the read tools, apply the allowlisted fix, verify, and post ONE
-Discord message per incident (what broke, evidence, what it did, result). William is @mentioned only when it could not fix it.
+"""Proactive Big Brother: detect an issue, investigate with the read tools, apply the allowlisted fix, verify. Discord gets
+ONE message per incident and ONLY when the infra is down and Big Brother could not fix it (with an @mention; William,
+Oct 28). Everything else (fixed, checked, recovered, warnings) goes to log.jsonl / incidents.jsonl only.
 
 Runs as netra-bigbrother-watch.service, one pass every INTERVAL_S. Detection is deterministic code, not Claude:
 - nodeguard state-<node>.json (nodeguard owns it): node offline, video down (skipped when nodeguard marks it scheduled).
@@ -34,6 +35,8 @@ RETRY_S = 3600
 MAX_ATTEMPTS = 3
 CLOSE_AFTER_CLEAR = 2         # passes without the issue before an incident closes
 MAX_POSTS_PER_HOUR = 6
+# incident kinds that mean "infra down"; uv (power warning) and engineslow are logged, never posted
+POST_KINDS = {"cam", "node", "tailscale", "watcher", "archiver", "pod", "engine", "enginelink", "judged"}
 EVENT_MERGE_S = {"tailscale": 3600, "uv": 12 * 3600}
 ARCHIVE_STALE_S = 9000        # the archiver passes hourly: a segment still not in R2 after 2.5 h = stalled
 PT = ZoneInfo("America/Los_Angeles")
@@ -464,7 +467,7 @@ PLAYBOOKS = {"cam": fix_camera, "node": fix_node, "tailscale": check_tailscale, 
 
 def message(i: Issue, did: list[str], fixed: bool | None, user_id: str, attempt: int = 1) -> tuple[str, bool]:
     mention = fixed is False
-    head = {True: "✅ FIXED", None: "ℹ️ checked", False: "🚨 NOT FIXED"}[fixed]
+    head = {True: "✅ FIXED", None: "ℹ️ checked", False: "🚨 DOWN, could not fix"}[fixed]
     lines = [f"🤖 **Big Brother** · {head}: **{i.title}**" + (f" (attempt {attempt})" if attempt > 1 else "")
              + (f" <@{user_id}>" if mention and user_id else "")]
     lines += ["**Evidence**"] + [f"• {e}" for e in i.evidence]
@@ -538,7 +541,10 @@ def run_pass(state: dict, now: float, handle=None, poster=post) -> list[dict]:
                                 "last_attempt": now, "fixed": fixed, "clear": 0, "kind": i.kind,
                                 "posted_unfixed": (fixed is False) or bool(inc and inc.get("posted_unfixed"))}
         text, mention = message(i, did, fixed, os.environ.get("DISCORD_MENTION_USER_ID", ""), attempt)
-        should_post = d == "new" or fixed != prev
+        # William, Oct 28 (strict): Discord only for "infra DOWN and Big Brother could not fix it". Fixed, checked,
+        # recovered, slow, under-voltage: log only. One post per incident: the first failed attempt (or a fixed
+        # incident that breaks again and can't be fixed).
+        should_post = fixed is False and prev is not False and i.kind in POST_KINDS
         posted = None
         if should_post and len(state["posts"]) < MAX_POSTS_PER_HOUR:
             posted = poster(text, mention)
@@ -561,10 +567,6 @@ def run_pass(state: dict, now: float, handle=None, poster=post) -> list[dict]:
             continue
         inc["clear"] = inc.get("clear", 0) + 1
         if inc["clear"] >= CLOSE_AFTER_CLEAR:
-            if inc.get("posted_unfixed") and len(state["posts"]) < MAX_POSTS_PER_HOUR:
-                poster(f"🤖 **Big Brother** · ✅ recovered: `{key}` is healthy again "
-                       f"(open {ago(inc['opened'], now)}, {inc['attempts']} attempt(s)).", False)
-                state["posts"].append(now)
             log.write({"kind": "auto_close", "key": key, "incident": inc})
             del state["open"][key]
     state["last_pass"] = {"t": now, "issues": sorted(seen), "snapshot": snapshot}

@@ -284,7 +284,7 @@ def test_message_mentions_only_when_not_fixed():
     t, m = watch.message(i, ["restarted push"], True, "42")
     assert not m and "<@42>" not in t and "FIXED" in t
     t, m = watch.message(i, ["nothing"], False, "42")
-    assert m and "<@42>" in t and "NOT FIXED" in t
+    assert m and "<@42>" in t and "could not fix" in t
     assert len(watch.message(i, ["x" * 3000], False, "42")[0]) <= 1901
 
 
@@ -301,32 +301,42 @@ def run(monkeypatch, issues_seq, results, now0=NOW):
 CAM = dict(key="cam:demo-linovision-2", kind="cam", target="demo-linovision-2", title="down", evidence=["e"])
 
 
-def test_one_post_per_incident_and_close(monkeypatch):
+def test_fixed_is_silent_and_closes(monkeypatch):
     posts, state = run(monkeypatch, [[CAM]] * 5 + [[], [], []], {CAM["key"]: True})
-    assert len(posts) == 1 and not posts[0][1]                       # fixed -> one post, no mention
+    assert posts == []                                               # fixed -> log only (William, Oct 28)
     assert state["open"] == {}                                       # closed after 2 clear passes
 
 
-def test_unfixed_mentions_once_retries_hourly_and_posts_recovery(monkeypatch):
+@pytest.mark.parametrize("fixed", [True, None])
+def test_only_unfixed_infra_down_posts(monkeypatch, fixed):
+    uv = dict(key="uv:demo-node", kind="uv", target="demo-node", title="uv", evidence=[])
+    slow = dict(key="engineslow:s", kind="engineslow", target="s", title="slow", evidence=[])
+    posts, _ = run(monkeypatch, [[uv, slow]], {uv["key"]: False, slow["key"]: False})
+    assert posts == []                                               # warnings never post, even unfixed
+    posts, _ = run(monkeypatch, [[CAM]], {CAM["key"]: fixed})
+    assert posts == []
+
+
+def test_unfixed_mentions_once_retries_hourly_and_recovers_silently(monkeypatch):
     results = {CAM["key"]: False}
     posts, state = run(monkeypatch, [[CAM]] * 30, results)          # 30 min still broken
     assert len(posts) == 1 and posts[0][1]                          # one mention, no repeats
     assert state["open"][CAM["key"]]["attempts"] == 1
     posts, state = run(monkeypatch, [[CAM]] * 62, results)          # an hour later: silent retry
     assert len(posts) == 1 and state["open"][CAM["key"]]["attempts"] == 2
-    posts, _ = run(monkeypatch, [[CAM]] * 3 + [[], []], results)    # recovers on its own -> one quiet note
-    assert len(posts) == 2 and "recovered" in posts[1][0] and not posts[1][1]
+    posts, state = run(monkeypatch, [[CAM]] * 3 + [[], []], results)  # recovers on its own -> no post
+    assert len(posts) == 1 and state["open"] == {}
 
 
 def test_tailscale_events_merge_within_an_hour(monkeypatch):
     ts = dict(key="tailscale:demo-node", kind="tailscale", target="demo-node", title="ts", evidence=[])
-    posts, _ = run(monkeypatch, [[ts], [], [ts], [], [ts]], {ts["key"]: True})
+    posts, _ = run(monkeypatch, [[ts], [], [ts], [], [ts]], {ts["key"]: False})
     assert len(posts) == 1
 
 
 def test_post_rate_limit(monkeypatch):
     many = [dict(key=f"watcher:c{n}", kind="watcher", target=f"c{n}", title="w", evidence=[]) for n in range(10)]
-    posts, _ = run(monkeypatch, [many], {m["key"]: True for m in many})
+    posts, _ = run(monkeypatch, [many], {m["key"]: False for m in many})
     assert len(posts) == watch.MAX_POSTS_PER_HOUR
 
 
