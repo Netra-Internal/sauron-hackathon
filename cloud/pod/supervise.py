@@ -14,6 +14,7 @@ Files in /workspace/edge (read every pass; a change applies to processes started
                  A camera in that site's site file (cameras[].source.camera_id) gets EDGE_ENGINE_URL and --judge on.
                  Engines post to the droplet's /ask directly (the edge relay only carries the edge routes).
   engine.env     KEY=VALUE lines added to every engine's env (e.g. ENGINE_WORLD=1, ENGINE_WORLD_PRIORS=<json>).
+  edge-<cam>.env KEY=VALUE lines added to that camera's edge env (e.g. EDGE_RACK=on, ASK_BIKE_MODEL=<onnx>).
   edge_jev       "on": cameras in dispatch_cams run the Jev watcher inside their edge (--jev on, DISPATCH_* from
                  dispatch.env, Jev key from /root/dispatch.secret) and boot.sh starts no dispatch.sh loops.
                  Anything else / missing: the standalone dispatch.sh watchers (the rollback).
@@ -170,6 +171,7 @@ def edge_pass(procs: dict, site_cams: dict[str, tuple[str, int]]):
             env.update(jev_env(), DISPATCH_LOG_DIR=f"{W}/dispatch/{cid}")
             os.makedirs(env["DISPATCH_LOG_DIR"], exist_ok=True)
             args += ["--jev", "on"]
+        env.update(env_file(f"{W}/edge-{cid}.env"))   # per-camera extras (e.g. EDGE_RACK, ASK_BIKE_MODEL)
         start(procs, f"edge:{cid}", args, env, f"edge-{cid}.log", f"on stream {stream} ")
 
 
