@@ -7,8 +7,12 @@ video to the cloud pod. This directory keeps it running unattended and records w
 **Upload budget per node** (measured Oct 28, Cloudflare upload with the push stopped): demo-node wlan1 10-13 Mbit/s,
 wlan0 2.6; demo-node2 wlan1 1.7-2.0, wlan0 0.86 (same UCSD-GUEST AP, weaker signal, 1.5 % TCP retransmits vs 0.07 %).
 The push must stay well under it: a stalled upload makes ffmpeg stop reading, the camera drops the RTSP session, and the
-relaunch churn wedges the Pi encoder. demo-node2 therefore pushes 800 kbit/s, GOP 3 s (`PUSH_VCODEC` in
-`/etc/netra-cloud-push.env`, `FALLBACK_VCODEC` in `/etc/default/netra-node-push-health`); demo-node 1.5 Mbit/s.
+relaunch churn wedges the Pi encoder. The weakest link is not always the Pi's Wi-Fi: on Oct 29 from 09:00 UTC the
+droplet->pod TCP leg (sshd -> pod :57062) lost packets in bursts (cwnd 150 -> 5, ~0.5 Mbit/s for 5-10 s), the SSH channel
+window stalled, and ffmpeg's socket backed up although the Pi's own uplink was clean (report §11). So **both nodes push
+800 kbit/s, GOP 3 s** (`PUSH_VCODEC` in `/etc/netra-cloud-push.env`, `FALLBACK_VCODEC` in
+`/etc/default/netra-node-push-health`, both layers): demo-node on h264_v4l2m2m (`-b:v 1500k` really sent ~2.1 Mbit/s;
+800k measures ~0.6), demo-node2 on libx264. Both use `select` decimation;
 demo-node2's push uses libx264 (no hardware encoder churn) and `select=...gte(t-prev_selected_t,0.095)` with
 `-fps_mode passthrough` instead of `fps=10`: `fps=10` pads uplink stalls with duplicate frames, which the edge skips.
 **demo-node2's wlan1 is pinned to one AP** (`802-11-wireless.bssid`, both layers): below -65 dBm NetworkManager's
