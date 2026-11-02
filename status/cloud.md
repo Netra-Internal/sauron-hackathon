@@ -1,6 +1,11 @@
 WORKING (demo-node + Jev on the pod): pod ready for a jetson-c920 push from demo-node (command below); Jev dispatch watchers running on the pod for axis-q6215 + jetson-c920, no verdict on /hack/ yet (nobody in view of the Axis; demo-node not pushing yet). LL-HLS still live at /hack/stream/axis-q6215/index.m3u8.
 
-## PUSHED 3bf8e87
+## PUSHED 0828314
+hack-cloud fast-forwarded onto main's sanitized tree (placeholders `<droplet>`/`<pod>`/`<camera-ip>`); droplet scripts
+(r2.sh, stage.sh, compare.py) now take `HACK_HOST` (DROPLET still wins). Real hosts/passwords only in ~/.config/netra/ (600), e.g.
+the paste-ready demo-node lines in `~/.config/netra/demo-node-push.txt`.
+
+## PUSHED 3bf8e87 (earlier)
 Branch hack-cloud, Netra-Internal/sauron-hackathon. Everything I built/deployed today is under `cloud/` (README: `cloud/README.md`):
 pod boot/mediamtx/supervisor/dispatch launcher/TRT build, box push + `push.env.example`, `demo-push.sh`, droplet tunnel units,
 nginx `/hack/stream/` snippet, shadow sink + compare tool, R2/stage scripts; plan `plans/cloud-edge.md`. Secrets are placeholders

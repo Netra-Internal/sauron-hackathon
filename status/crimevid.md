@@ -19,4 +19,4 @@ DONE — page https://claude.ai/artifact/HAjU6Ncdn3FY9ci6hzzrrf (private; Willia
 - Side effect: ultralytics auto-installed `lap` into ~/sauron-venv (needed for ByteTrack).
 
 ## Push
-PUSHED 80b8e69 (Netra-Internal/sauron-hackathon branch hack-crimevid, crimevid/: README, prep.sh, run.sh, render.py, police.py, page.py, page.tpl.html, summary.html, upload_r2.py; no secrets; nothing deployed)
+PUSHED f9d8189 (Netra-Internal/sauron-hackathon branch hack-crimevid, crimevid/: README, prep.sh, run.sh, render.py, police.py, page.py, page.tpl.html, summary.html, upload_r2.py; no secrets; nothing deployed)

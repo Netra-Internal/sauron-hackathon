@@ -155,3 +155,10 @@ PUSHED 1da00bf
   - Env template: `tools/hack-launch.env.example` (placeholders only).
 - Deploy uses the shared `deploy/install.sh` and `sauron-hack.service` as they are in the repo; I added no unit, nginx or secret of my own.
 - The calib state on the droplet (`/var/lib/sauron-hack/calib`) is runtime data and is not in the repo.
+
+## Host cleanup
+PUSHED 0dd1065
+- Merged origin/main.
+- The calib tools now read the host from `HACK_BASE=https://<host>`; there's no hostname left in my files.
+- `hackdash/CALIB.md` documents `HACK_HOST=root@<droplet> deploy/install.sh`.
+- The calib code and tests have no IPs or hosts. `ASK_URL` defaults to localhost (127.0.0.1).

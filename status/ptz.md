@@ -28,7 +28,7 @@ DONE: PTZ writes are now OPERATOR-ONLY (deployed 23:1x UTC): hack_launch and eve
 
 ## Camera commands I sent (Manager asked: last 15 min; I list everything this afternoon to be complete). Times UTC.
 Attribution comes from my own session record matched to ptzd's log. The sauron-hack log can't separate senders: every request
-arrives from the Cloudflare egress 69.196.39.231, mine and William's alike.
+arrives from the Cloudflare egress <cloudflare edge IP>, mine and William's alike.
 - 22:49:28-22:49:49 tools/ptz_test.py #1: Save as Home (hack-home, via ptz.cgi = no-op), pan 1.5 s @0.5, tilt 1.5 s @0.5,
   zoom-in 1.5 s, one deadman move pan -0.3, centre (areazoom x=960/1280), Go Home (failed, 502).
 - ~22:50 direct VAPIX from the Jetson: absolute move pan=0.01 tilt=-44.98 zoom=1 (back to the start pose),
@@ -50,7 +50,7 @@ arrives from the Cloudflare egress 69.196.39.231, mine and William's alike.
 
 
 ## Deployed (22:48–23:0x UTC) — what is where
-- Jetson (jetson-cloud): ptzd.service (new unit, DynamicUser, 127.0.0.1:8530), /opt/netra/ptzd/ptzd.py, /etc/ptzd.env (root 600:
+- Jetson (<jetson>): ptzd.service (new unit, DynamicUser, 127.0.0.1:8530), /opt/netra/ptzd/ptzd.py, /etc/ptzd.env (root 600:
   creds from ~/.config/netra/axis-q6215.env + token). Camera <camera-ip> on enP8p1s0. No other Jetson unit touched.
 - Droplet: ptzd-tunnel.service (new, ssh -L 127.0.0.1:8530 -> <jetson>, same pattern as netra-ask-edge-tunnel);
   /etc/ptzd-token (root:netra 640).
@@ -59,7 +59,7 @@ arrives from the Cloudflare egress 69.196.39.231, mine and William's alike.
   Dash's 22:54 deploy from main put back an OLD ptz.css (no Day/Night styles); I re-copied mine. Now the deployed
   ptz.py / ptz.js / ptz.css / hack.js / app.py == hack-launch f9261ee (sha256 checked). Merge f9261ee so the next deploy keeps them.
 
-## Real-camera test (tools/ptz_test.py, laptop -> https://internal.netralabs.net/hack/api, service account hack_launch)
+## Real-camera test (tools/ptz_test.py, laptop -> https://<internal host>/hack/api, service account hack_launch)
     15:51:35 start {'pan': 0.0, 'tilt': -44.97, 'zoom': 1.0}
     15:51:36 saved start pose as Home (hack-home)
     15:51:40 pan right 1.5 s @0.5 -> {'pan': 136.74, 'tilt': -44.98, 'zoom': 1.0} dpan 136.74
@@ -101,10 +101,12 @@ Latency, per command:
 - UI: Day / Night (IR) / Auto buttons under the zoom buttons in the Move camera screen.
 
 ## Note
-- William is already using it (stops/snapshots from 69.196.39.231 in the sauron-hack log; camera pose changed).
+- William is already using it (stops/snapshots from <cloudflare edge IP> in the sauron-hack log; camera pose changed).
 - The old autonomous tracker netra-ptz-axis on the laptop WSL is still running, but it can't reach the camera (the camera
   is on the Jetson now), so no conflict while it stays there.
 
 ## Repo push (00:30 UTC)
 PUSHED 524e375 (hack-launch = origin/main 4e33b75 + 1 commit: droplink/README.md, ptzd/README.md, env templates with placeholders, ptzd/deployed/*.service). Everything I built or deployed today is on the branch: droplink/, ptzd/, hackdash/launch.py, hackdash/ptz.py, static/ptz.{js,css}, ptz_zoomcal.json, tools/click_path_test.py, ptz_test.py, ptz_shots.js, tests/test_{droplink,launch,ptz,ptz_guard}.py. Outside this repo: netra-internal branch hack-launch-next-ok @ 71d5695 (/hack in NEXT_OK).
 INCIDENT: at 00:27 the live /opt/netra/sauron-hack/hackdash/ptz.py was an OLD copy WITHOUT the operator-only guard (someone deployed a stale tree; main itself has the guard). I restored it from main (sha e5ca429e…, = main), restarted sauron-hack, and checked as hack_launch: move, stop, home, home/save and lock returned 403, and ptzd's command count stayed at 187 → 187 (zero camera commands). Stale copy saved at droplet /root/ptz.py.stale-*. WHOEVER DEPLOYS: deploy from current main and check `sha256sum hackdash/ptz.py` = e5ca429ee395d808….
+
+PUSHED 13eead6: install scripts take HACK_HOST (HOST/DROPLET still override); tools/ptz_test.py and ptz_shots.js need HACK_API / HACK_BASE (no default host); status sanitized (no IPs/hosts).
