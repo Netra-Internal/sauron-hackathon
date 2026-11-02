@@ -79,3 +79,13 @@ No new compute anywhere; bandwidth +1.4 Mbit/s on that box's uplink and the drop
 ## Files (this repo, `cloud/`)
 `pod/boot.sh` (pod entry, idempotent), `pod/mediamtx.yml`, `pod/supervise.py`, `pod/build_trt.py`, `shadowsink.py`,
 `push.sh` (box side), `stage.sh` (code + models to R2, pod env), `r2.sh` (R2 via the droplet's creds).
+
+## Nov 2 2026: durable boot, office-street
+- The pod start command now keeps the last good `boot.sh` in `/workspace/edge/boot.sh` and boots from it when `BOOT_URL`
+  has expired (R2 presigns last 7 days at most). `boot.sh` already skips every cached download and keeps the extracted
+  `cloud/` when `CLOUD_URL` fails, so a restart no longer depends on the links; fresh links only matter for a new volume.
+  `cloud/resign.sh <pod>` sets this and re-signs (it RESETS the pod). Done on sauron-cloud-edge-2 Nov 2 20:52 UTC; ports
+  became 22 -> 56833, 8322 -> 56834 (droplet tunnels re-pointed; demo-node's direct push target must change too).
+- jetson-cloud is the office-street gateway: `netra-cloud-push` (this unit) stream-copies the Axis (1080p5, camera-side MBR
+  cap 1.2 Mbit/s) as path `axis-q6215`. Measured uplink on UCSD-GUEST: ~1.8 Mbit/s up (224-228 KB/s, 2 x 60 s), RTT to the
+  droplet 70 ms min / 0.7 s mean, droplet -> pod 99 ms. The Oct 24 figure (64-93 Mbit/s) no longer holds.

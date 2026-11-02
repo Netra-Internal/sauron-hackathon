@@ -1,0 +1,15 @@
+[Unit]
+Description=Netra site gateway: stream-copy local cameras (STREAMS) to the cloud edge pod over the droplet relay (cloud/push.sh)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=netra
+EnvironmentFile=/home/netra/cloud/push.env
+ExecStart=/bin/bash /home/netra/cloud/push.sh
+Restart=always
+RestartSec=10
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target
