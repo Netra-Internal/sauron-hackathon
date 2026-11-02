@@ -125,6 +125,8 @@ def sites_pass(procs: dict, site_cams: dict[str, tuple[str, int]]):
         if time.time() - _sitefile_at.get(sid, 0) >= SITEFILE_EVERY_S:
             try:
                 sf = get(f"{ASK_DIRECT}/api/sites/{sid}/sitefile", True)
+                for k in [k for k, v in site_cams.items() if v[0] == sid]:   # a camera moved off the site leaves it
+                    del site_cams[k]
                 for c in sf.get("cameras") or []:
                     cid = (c.get("source") or {}).get("camera_id")
                     if cid:
