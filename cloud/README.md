@@ -25,6 +25,8 @@ camera -> box ffmpeg -c copy -> ssh -L via droplet (cloudrelay) -> pod mediamtx 
 | `pod/authorized_keys` | droplet key, forward-only to the pod's 8450/8888 |
 | `pod/ffmpeg-ring-flush.sh`, `pod/cloudsite/` | experiments that did not help (kept for the record) |
 | `push.sh`, `push.env.example` | box side: all cameras in `STREAMS` over one SSH tunnel, Wi-Fi-only guard |
+| `netra-cloud-push.service` | systemd unit for `push.sh` on a gateway box (jetson-cloud since Nov 2: the office Axis, site office-street) |
+| `resign.sh` | re-sign the pod's R2 links and set its start command to boot from the cached `/workspace/edge/boot.sh` when they have expired (RESETS the pod: re-point ports after) |
 | `demo-push.sh` | any box with internet: webcam or RTSP straight to the pod's public RTSPS port |
 | `droplet/*.service`, `nginx-hack-stream.conf` | droplet tunnels to the pod and the `/hack/stream/` location |
 | `shadowsink.py`, `compare.py` | shadow mode sink and shadow-vs-Jetson comparison (shadow was skipped at cutover) |
