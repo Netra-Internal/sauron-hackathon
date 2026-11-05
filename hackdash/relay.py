@@ -7,6 +7,10 @@ netra-ask's bucket ingest takes 2-12 s per POST and the edge poster is sequentia
   netra-ask answers. Nothing is dropped: a 4xx netra-ask will never accept (bad payload) is moved to rejected/ and
   logged, never deleted. Memory holds file names only; a spool over HACK_RELAY_MAX_MB answers 503, so the edge keeps the
   bucket and retries itself.
+- Live first: a spooled bucket older than HACK_RELAY_LIVE_S (default 120 s) is never forwarded; it is parked in late/
+  instead. Strict in-order forwarding turned the 12.5 h netra-ask outage of Nov 5 into 12.5 h-stale live boxes for
+  hours after netra-ask came back (the backlog drained at ~6x real time). Parked buckets are kept, oldest deleted past
+  HACK_RELAY_LATE_MAX_MB, for an offline backfill (move the .req files back into the spool dir and restart).
 - GET api/edge/config, POST api/edge/heartbeat: plain synchronous pass-through (netra-ask checks the token).
 - GET api/edge/jev_area, POST api/dispatch/incidents and api/dispatch/watch: the same pass-through, for an edge that runs
   the Jev watcher in-process (ask.edge.main --jev on) and so posts through this base URL too.
@@ -33,6 +37,8 @@ router = APIRouter()
 ASK_URL = os.environ.get("HACK_RELAY_ASK_URL", "http://127.0.0.1:8400/ask")
 SPOOL = Path(os.environ.get("HACK_RELAY_DIR", "/var/lib/sauron-hack/relay"))
 MAX_BYTES = int(float(os.environ.get("HACK_RELAY_MAX_MB", "2000")) * 1e6)
+LIVE_S = float(os.environ.get("HACK_RELAY_LIVE_S", "120"))
+LATE_MAX_BYTES = int(float(os.environ.get("HACK_RELAY_LATE_MAX_MB", "5000")) * 1e6)
 BACKOFF_S = (1, 2, 5, 10, 30)
 KEEP_HEADERS = ("content-type", "authorization", "user-agent")
 
@@ -44,7 +50,7 @@ class Spool:
         self.bytes = 0
         self.seq = 0
         self.stats = {"received": 0, "forwarded": 0, "rejected": 0, "retries": 0, "last_error": None,
-                      "last_forward_s": None, "last_forward_at": None}
+                      "last_forward_s": None, "last_forward_at": None, "parked": 0, "late_deleted": 0}
         self.wake = asyncio.Event()
         self.task: asyncio.Task | None = None
         self.loaded = False
@@ -55,6 +61,9 @@ class Spool:
             return
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         (self.root / "rejected").mkdir(exist_ok=True)
+        (self.root / "late").mkdir(exist_ok=True)
+        self.late = deque(sorted(p.name for p in (self.root / "late").glob("*.req")))
+        self.late_bytes = sum((self.root / "late" / n).stat().st_size for n in self.late)
         for p in sorted(self.root.glob("*.req")):
             self.q.append(p.name)
             self.bytes += p.stat().st_size
@@ -82,19 +91,41 @@ class Spool:
         n = int.from_bytes(raw[:4], "big")
         return json.loads(raw[4:4 + n]), raw[4 + n:]
 
-    def done(self, name: str, rejected: bool = False):
+    def done(self, name: str, rejected: bool = False, to: str | None = None):
         p = self.root / name
         size = p.stat().st_size
-        if rejected:
-            os.replace(p, self.root / "rejected" / name)
+        if rejected or to:
+            os.replace(p, self.root / (to or "rejected") / name)
         else:
             p.unlink()
         self.q.popleft()
         self.bytes -= size
 
+    @staticmethod
+    def age_s(name: str, now_s: float | None = None) -> float:
+        """Seconds since the relay received this bucket (the name carries the receive time in ns)."""
+        return (now_s if now_s is not None else time.time()) - int(name.split("-")[1].split(".")[0]) / 1e9
+
+    def park(self, name: str):
+        """Too old for live: out of the forward queue into late/ (kept, capped at LATE_MAX_BYTES, oldest go first)."""
+        size = (self.root / name).stat().st_size
+        self.done(name, to="late")
+        self.stats["parked"] += 1
+        self.late.append(name)
+        self.late_bytes += size
+        while self.late and self.late_bytes > LATE_MAX_BYTES:    # running total: no directory scan per bucket
+            p = self.root / "late" / self.late.popleft()
+            try:
+                self.late_bytes -= p.stat().st_size
+                p.unlink()
+            except FileNotFoundError:
+                pass
+            self.stats["late_deleted"] += 1
+
     def status(self) -> dict:
         oldest = int(self.q[0].split("-")[1].split(".")[0]) if self.q else None
         return {"backlog": len(self.q), "backlog_mb": round(self.bytes / 1e6, 2),
+                "late": len(getattr(self, "late", ())), "late_mb": round(getattr(self, "late_bytes", 0) / 1e6, 2),
                 "oldest_age_s": round(time.time() - oldest / 1e9, 1) if oldest else None, **self.stats}
 
 
@@ -110,6 +141,13 @@ async def _forward_loop(sp: Spool):
             await sp.wake.wait()
             continue
         name = sp.q[0]
+        if sp.age_s(name) > LIVE_S:
+            sp.park(name)
+            if sp.stats["parked"] % 500 == 1:
+                log.warning("relay: parking stale buckets (older than %.0fs) in late/, %d so far, backlog %d",
+                            LIVE_S, sp.stats["parked"], len(sp.q))
+            await asyncio.sleep(0)                   # thousands after an outage: never hold the event loop
+            continue
         headers, body = sp.read(name)
         for attempt in range(10 ** 9):
             t0 = time.monotonic()
@@ -132,6 +170,9 @@ async def _forward_loop(sp: Spool):
                 sp.stats["rejected"] += 1
                 break
             sp.stats["retries"] += 1
+            if sp.age_s(name) > LIVE_S:              # netra-ask down for long: this one is no longer live
+                sp.park(name)
+                break
             wait = BACKOFF_S[min(attempt, len(BACKOFF_S) - 1)]
             log.warning("relay: forward %s failed (%s), retry in %ds, backlog %d", name, err, wait, len(sp.q))
             await asyncio.sleep(wait)
