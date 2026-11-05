@@ -62,6 +62,8 @@ class Spool:
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         (self.root / "rejected").mkdir(exist_ok=True)
         (self.root / "late").mkdir(exist_ok=True)
+        self.late = deque(sorted(p.name for p in (self.root / "late").glob("*.req")))
+        self.late_bytes = sum((self.root / "late" / n).stat().st_size for n in self.late)
         for p in sorted(self.root.glob("*.req")):
             self.q.append(p.name)
             self.bytes += p.stat().st_size
@@ -106,20 +108,24 @@ class Spool:
 
     def park(self, name: str):
         """Too old for live: out of the forward queue into late/ (kept, capped at LATE_MAX_BYTES, oldest go first)."""
+        size = (self.root / name).stat().st_size
         self.done(name, to="late")
         self.stats["parked"] += 1
-        late = sorted((self.root / "late").glob("*.req"))
-        total = sum(p.stat().st_size for p in late)
-        for p in late:
-            if total <= LATE_MAX_BYTES:
-                break
-            total -= p.stat().st_size
-            p.unlink()
+        self.late.append(name)
+        self.late_bytes += size
+        while self.late and self.late_bytes > LATE_MAX_BYTES:    # running total: no directory scan per bucket
+            p = self.root / "late" / self.late.popleft()
+            try:
+                self.late_bytes -= p.stat().st_size
+                p.unlink()
+            except FileNotFoundError:
+                pass
             self.stats["late_deleted"] += 1
 
     def status(self) -> dict:
         oldest = int(self.q[0].split("-")[1].split(".")[0]) if self.q else None
         return {"backlog": len(self.q), "backlog_mb": round(self.bytes / 1e6, 2),
+                "late": len(getattr(self, "late", ())), "late_mb": round(getattr(self, "late_bytes", 0) / 1e6, 2),
                 "oldest_age_s": round(time.time() - oldest / 1e9, 1) if oldest else None, **self.stats}
 
 
@@ -140,6 +146,7 @@ async def _forward_loop(sp: Spool):
             if sp.stats["parked"] % 500 == 1:
                 log.warning("relay: parking stale buckets (older than %.0fs) in late/, %d so far, backlog %d",
                             LIVE_S, sp.stats["parked"], len(sp.q))
+            await asyncio.sleep(0)                   # thousands after an outage: never hold the event loop
             continue
         headers, body = sp.read(name)
         for attempt in range(10 ** 9):

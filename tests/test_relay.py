@@ -134,5 +134,6 @@ def test_late_dir_is_capped_oldest_first(tmp_path, monkeypatch):
     assert sp.stats["late_deleted"] == 3 and left == []
     monkeypatch.setattr(relay, "LATE_MAX_BYTES", 10 ** 9)
     sp2 = _spool_with(tmp_path, [900, 800])
+    sp2.late_bytes = 0
     sp2.park(sp2.q[0]); sp2.park(sp2.q[0])
     assert len(list((tmp_path / "late").glob("*.req"))) == 2 and sp2.stats["late_deleted"] == 0
