@@ -41,9 +41,9 @@ SECRET = "/root/dispatch.secret"
 REC_KEEP_S = 7 * 86400
 
 
-def get(url: str, auth: bool) -> dict:
+def get(url: str, auth: bool, timeout: float = 20) -> dict:
     h = {"Authorization": f"Bearer {TOKEN}", "User-Agent": "netra-edge/1"} if auth else {}
-    with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=20) as r:
+    with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=timeout) as r:
         return json.loads(r.read())
 
 
@@ -164,6 +164,8 @@ def sites_pass(procs: dict, site_cams: dict[str, tuple[str, int]]):
 
 
 def edge_pass(procs: dict, site_cams: dict[str, tuple[str, int]]):
+    if _mtx["fails"]:          # mediamtx not answering: the watch pass handles it; don't spend another 20 s timeout
+        return
     cams = get(f"{ASK}/api/edge/config", True)["cameras"]
     ready = {p["name"] for p in get(f"{MTX}/v3/paths/list", False)["items"] if p.get("ready")}
     jev_cams = set(words("dispatch_cams")) if words("edge_jev") == ["on"] else set()
@@ -195,7 +197,7 @@ def edge_pass(procs: dict, site_cams: dict[str, tuple[str, int]]):
 #   edge stuck  = its stream is ready AND still receiving bytes on mediamtx, but the edge process used < STUCK_CPU of a
 #                 core over STUCK_S (a working edge decodes + infers at ~0.4 core; a stopped/deadlocked/stuck-reader one ~0)
 #                 -> SIGKILL; the next edge pass starts a fresh one. At most one kill per camera per KILL_BACKOFF_S.
-#   mediamtx    = its API failing MTX_FAILS passes in a row -> SIGKILL (boot.sh's keep loop restarts it in 5 s).
+#   mediamtx    = its API (5 s timeout) failing MTX_FAILS passes in a row -> SIGKILL (boot.sh's keep loop restarts it in 5 s).
 STUCK_S = float(os.environ.get("EDGE_STUCK_S", "90"))
 STUCK_CPU = float(os.environ.get("EDGE_STUCK_CPU", "0.03"))
 KILL_BACKOFF_S = float(os.environ.get("EDGE_KILL_BACKOFF_S", "300"))
@@ -231,7 +233,7 @@ def mediamtx_pids() -> list[int]:
 def watch_pass(procs: dict, now: float | None = None):
     now = now or time.time()
     try:
-        paths = {p["name"]: p for p in get(f"{MTX}/v3/paths/list", False)["items"]}
+        paths = {p["name"]: p for p in get(f"{MTX}/v3/paths/list", False, timeout=5)["items"]}
         _mtx["fails"] = 0
     except Exception as e:  # noqa: BLE001
         _mtx["fails"] += 1
