@@ -7,7 +7,10 @@
 # Env (presigned R2 GETs unless noted): CODE_URL CLOUD_URL FULL_URL TILE_URL SIGLIP_URL POSE_URL, LOG_PUT_URL +
 # SHADOW_PUT_URL (presigned PUTs), ASK_WORKER_TOKEN, PUSH_PASS, EDGE_MODE. No camera list: see cloud/pod/supervise.py.
 # Idempotent: a container restart re-uses /workspace (downloads, venv, engine) and just starts the services again.
-W=/workspace/edge; mkdir -p $W/models $W/bin $W/logs $W/shadow && cd $W
+# Expired presigned URLs (7 d) never block a reboot: every download is skipped when its file is cached under $W, and
+# cloud.tgz (refreshed each boot) falls back to the cached cloud/. BOOT_DRY_RUN=1 + EDGE_HOME=<dir> stops after the
+# file checks, before any service starts (how the expired-URL boot path is tested).
+W=${EDGE_HOME:-/workspace/edge}; mkdir -p $W/models $W/bin $W/logs $W/shadow && cd $W
 exec > >(tee -a $W/logs/boot.log) 2>&1
 echo "== boot $(date -u) mode=${EDGE_MODE:=shadow}"
 
@@ -30,7 +33,9 @@ fail() { echo "== BOOT FAILED $(date -u): $*"; tail -n 60 $W/logs/boot.log > $W/
 get() { [ -s "$2" ] && return 0; curl -fsSL --retry 5 -o "$2.part" "$1" && mv -f "$2.part" "$2"; }
 set -x
 get "$CODE_URL" code.tgz && tar xzf code.tgz --no-same-owner                 # netra-ask ask/ at a pinned commit (git archive)
-curl -fsSL --retry 5 -o cloud.tgz "$CLOUD_URL" && tar xzf cloud.tgz --no-same-owner   # this repo's cloud/ (always fresh)
+# this repo's cloud/ (fresh when the URL still works; the cached cloud/ otherwise)
+{ curl -fsSL --retry 5 -o cloud.tgz.part "$CLOUD_URL" && mv -f cloud.tgz.part cloud.tgz && tar xzf cloud.tgz --no-same-owner; } \
+  || { rm -f cloud.tgz.part; echo "== cloud.tgz not refreshed (expired or unreachable URL): using the cached cloud/"; }
 get "$FULL_URL" models/yolo11s-1280.onnx
 get "$TILE_URL" models/yolo11s-640.onnx
 get "$POSE_URL" models/yolo11s-pose-320.onnx
@@ -54,6 +59,7 @@ for f in ask/edge/main.py cloud/pod/supervise.py models/yolo11s-1280.onnx models
          models/siglip-vision.engine bin/ffmpeg bin/mediamtx venv/.ok tls.key; do [ -s $f ] || [ -e $f -a $f = venv/.ok ] || fail "missing $f"; done
 # the droplet's edge tunnel key (port-forward to edge-serve only), like netra-ask-edge-tunnel to the Jetson
 mkdir -p /root/.ssh; grep -qf cloud/pod/authorized_keys /root/.ssh/authorized_keys 2>/dev/null || cat cloud/pod/authorized_keys >> /root/.ssh/authorized_keys
+if [ -n "${BOOT_DRY_RUN:-}" ]; then echo "== BOOT DRY RUN OK $(date -u): every file present, no service started"; kill $(jobs -p) 2>/dev/null; exit 0; fi
 sed "s|@PUSH_PASS@|$PUSH_PASS|; s|@DEMO_PASS@|${DEMO_PASS:-$(openssl rand -hex 16)}|; s|@W@|$W|g" cloud/pod/mediamtx.yml > mediamtx.yml
 
 export PYTHONPATH=$W ASK_BACKEND=ort ASK_POSE=1 \

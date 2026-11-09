@@ -76,9 +76,20 @@ class Adopted:
     def poll(self):
         try:
             os.kill(self.pid, 0)
+            if proc_stat(self.pid)[0] == "Z":       # killed but not reaped by its (gone) parent: dead
+                self.returncode = -9
         except ProcessLookupError:
             self.returncode = -1
         return self.returncode
+
+
+def proc_stat(pid: int) -> tuple[str, int]:
+    """(state letter, utime + stime in clock ticks) from /proc/<pid>/stat; ("", 0) when unreadable."""
+    try:
+        f = open(f"/proc/{pid}/stat").read().rsplit(")", 1)[1].split()
+        return f[0], int(f[11]) + int(f[12])
+    except (OSError, IndexError, ValueError):
+        return "", 0
 
 
 KINDS = {b"ask.edge.main": ("edge", b"--camera"), b"ask.siteengine": ("engine", b"--site"),
@@ -177,6 +188,78 @@ def edge_pass(procs: dict, site_cams: dict[str, tuple[str, int]]):
         start(procs, f"edge:{cid}", args, env, f"edge-{cid}.log", f"on stream {stream} ")
 
 
+# ------------------------------------------------------------------ self-repair (reliability, Nov 9 2026)
+# An edge that is alive but not working, and a mediamtx that is alive but not answering, were never restarted: the edge
+# keeps heartbeating from its own thread (or not at all when the whole process is wedged) and the old code only
+# restarted processes that EXITED. Local signals only (no droplet dependency):
+#   edge stuck  = its stream is ready AND still receiving bytes on mediamtx, but the edge process used < STUCK_CPU of a
+#                 core over STUCK_S (a working edge decodes + infers at ~0.4 core; a stopped/deadlocked/stuck-reader one ~0)
+#                 -> SIGKILL; the next edge pass starts a fresh one. At most one kill per camera per KILL_BACKOFF_S.
+#   mediamtx    = its API failing MTX_FAILS passes in a row -> SIGKILL (boot.sh's keep loop restarts it in 5 s).
+STUCK_S = float(os.environ.get("EDGE_STUCK_S", "90"))
+STUCK_CPU = float(os.environ.get("EDGE_STUCK_CPU", "0.03"))
+KILL_BACKOFF_S = float(os.environ.get("EDGE_KILL_BACKOFF_S", "300"))
+MTX_FAILS = int(os.environ.get("MTX_FAILS", "3"))
+TICK_HZ = os.sysconf("SC_CLK_TCK")
+_samples: dict[str, list[tuple[float, int, int]]] = {}     # edge key -> [(t, cpu ticks, stream bytes received)]
+_killed_at: dict[str, float] = {}
+_mtx = {"fails": 0, "killed_at": 0.0}
+
+
+def stuck(samples: list[tuple[float, int, int]], now: float, window_s: float = STUCK_S, cpu: float = STUCK_CPU) -> bool:
+    """True when the samples span >= window_s, the stream received data over it, and the process barely ran."""
+    old = [x for x in samples if now - x[0] >= window_s]
+    if not old:
+        return False
+    t0, c0, b0 = old[-1]
+    t1, c1, b1 = samples[-1]
+    return b1 - b0 > 100_000 and (c1 - c0) / TICK_HZ / max(t1 - t0, 1e-6) < cpu
+
+
+def mediamtx_pids() -> list[int]:
+    out = []
+    for d in filter(str.isdigit, os.listdir("/proc")):
+        try:
+            argv = open(f"/proc/{d}/cmdline", "rb").read().split(b"\0")
+        except OSError:
+            continue
+        if argv and argv[0].endswith(b"bin/mediamtx"):
+            out.append(int(d))
+    return out
+
+
+def watch_pass(procs: dict, now: float | None = None):
+    now = now or time.time()
+    try:
+        paths = {p["name"]: p for p in get(f"{MTX}/v3/paths/list", False)["items"]}
+        _mtx["fails"] = 0
+    except Exception as e:  # noqa: BLE001
+        _mtx["fails"] += 1
+        print(f"{time.strftime('%T')} watch: mediamtx API failed ({_mtx['fails']}/{MTX_FAILS}): {type(e).__name__}: {e}", flush=True)
+        if _mtx["fails"] >= MTX_FAILS and now - _mtx["killed_at"] >= KILL_BACKOFF_S:
+            for pid in mediamtx_pids():
+                os.kill(pid, 9)
+                print(f"{time.strftime('%T')} watch: mediamtx pid {pid} not answering: killed (boot.sh restarts it)", flush=True)
+            _mtx.update(fails=0, killed_at=now)
+        return
+    for key, p in list(procs.items()):
+        kind, _, cid = key.partition(":")
+        if kind != "edge" or p.poll() is not None:
+            _samples.pop(key, None)
+            continue
+        path = paths.get(cid) or {}
+        state, ticks = proc_stat(p.pid)
+        s = _samples.setdefault(key, [])
+        s.append((now, ticks, int(path.get("bytesReceived") or 0) if path.get("ready") else 0))
+        del s[:-40]
+        if stuck(s, now) and now - _killed_at.get(key, 0) >= KILL_BACKOFF_S:
+            os.kill(p.pid, 9)
+            _killed_at[key] = now
+            _samples.pop(key, None)
+            print(f"{time.strftime('%T')} watch: {key} pid {p.pid} stuck (state {state or '?'}, stream receiving, "
+                  f"no CPU for {STUCK_S:.0f} s): killed, restarting", flush=True)
+
+
 def prune_recordings():
     now = time.time()
     for root, _, files in os.walk(REC):
@@ -200,7 +283,7 @@ def main():
     last_prune = 0.0
     while True:
         # each part on its own: a droplet blip in one must not stop the other (or the engines' restarts)
-        for step in (lambda: sites_pass(procs, site_cams), lambda: edge_pass(procs, site_cams)):
+        for step in (lambda: sites_pass(procs, site_cams), lambda: watch_pass(procs), lambda: edge_pass(procs, site_cams)):
             try:
                 step()
             except Exception as e:  # noqa: BLE001 — the supervisor must outlive a droplet or mediamtx blip
